@@ -6,11 +6,13 @@ import ui
 
 
 def main():
+    #initialization ng Database
     db.init_db()
     root = tk.Tk()
     root.title('Laundrify')
     root.geometry('1000x700')
 
+    # Header
     nav = ttk.Frame(root)
     nav.pack(fill='x')
     ttk.Label(nav, text='Laundrify', font=('Segoe UI', 18, 'bold')).pack(side='left', padx=10)
@@ -18,13 +20,14 @@ def main():
     container = ttk.Frame(root)
     container.pack(fill='both', expand=True)
 
+    # ito yung mga frames na gagamitin natin, pwede pa magdagdag ng frames kung gusto mo
     frames = {}
     for F in (ui.NewOrderFrame, ui.OrdersFrame, ui.ReportsFrame):
         frame = F(container, root)
         frame.grid(row=0, column=0, sticky='nsew')
         frames[F.__name__] = frame
 
-    # simple toolbar
+    # shonget na toolbar pinapakita niya ung frame sa taas depende sa button na pinindot mo
     tb = ttk.Frame(root)
     tb.pack(fill='x')
     def show(name):

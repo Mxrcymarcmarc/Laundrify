@@ -5,13 +5,13 @@ import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "laundrify.db")
 
-
+# helper function para makakuha ng connection sa database, lagi natin gagamitin to sa mga functions sa baba
 def get_conn():
     conn = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
     conn.row_factory = sqlite3.Row
     return conn
 
-
+# function para i-initialize ang database, dito natin gagawin yung tables at maglagay ng default services kung wala pa
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
@@ -61,9 +61,10 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 """)
     conn.commit()
-
+    
     cur.execute("SELECT COUNT(*) as c FROM services")
     row = cur.fetchone()
+    # kung wala pang services, mag-iinsert tayo ng default services para ready na agad yung app pag first run
     if row is None or row[0] == 0:
         services = [
             ("Wash", 3.0, "per_kg"),
@@ -77,7 +78,7 @@ CREATE TABLE IF NOT EXISTS payments (
         conn.commit()
     conn.close()
 
-
+# functions para gumawa ng customer, order, at iba pang database operations na gagamitin natin sa UI
 def create_customer(name, phone=None, email=None, address=None):
     conn = get_conn()
     cur = conn.cursor()
@@ -87,7 +88,7 @@ def create_customer(name, phone=None, email=None, address=None):
     conn.close()
     return cid
 
-
+# function para gumawa ng order, dito natin nilalagay sa database yung order kasama na yung mga items at quantity, tapos cinacalculate ung subtotal base sa unit price ng service
 def create_order(customer_id, items, notes=None):
     conn = get_conn()
     cur = conn.cursor()
@@ -107,7 +108,7 @@ def create_order(customer_id, items, notes=None):
     conn.close()
     return order_id
 
-
+# function para i-list yung mga services dun sa NewOrderFrame
 def list_services():
     conn = get_conn()
     cur = conn.cursor()
@@ -116,7 +117,7 @@ def list_services():
     conn.close()
     return [dict(r) for r in rows]
 
-
+# function para i-list yung mga orders dun sa OrdersFrame, kasama na yung customer name at total amount ng order para mas madali makita ng user
 def list_orders():
     conn = get_conn()
     cur = conn.cursor()
@@ -131,7 +132,7 @@ ORDER BY o.received_at DESC
     conn.close()
     return [dict(r) for r in rows]
 
-
+# id, uiid, customer_name, status, received_at, total (display niya to sa OrdersFrame)
 def get_order_items(order_id):
     conn = get_conn()
     cur = conn.cursor()
@@ -144,7 +145,7 @@ WHERE oi.order_id=?
     conn.close()
     return [dict(r) for r in rows]
 
-
+# function para i-calculate yung total ng order, gagamitin natin to sa Order Details at sa Reports para makita yung total revenue
 def order_total(order_id):
     conn = get_conn()
     cur = conn.cursor()
@@ -152,7 +153,7 @@ def order_total(order_id):
     r = cur.fetchone(); conn.close()
     return r['total'] if r else 0
 
-
+# function para i-update yung status ng order, depende sa status na pipiliin ng user sa OrdersFrame, mag-a-update siya ng status at maglalagay ng timestamp kung kailan ready o released yung order
 def update_order_status(order_id, new_status):
     conn = get_conn(); cur = conn.cursor()
     now = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
@@ -164,55 +165,55 @@ def update_order_status(order_id, new_status):
         cur.execute("UPDATE orders SET status=? WHERE id=?", (new_status, order_id))
     conn.commit(); conn.close()
 
-
+# function para i-record yung payment ng customer, gagamitin natin to sa Order Details para ma-record kung magkano na ang binayaran ng customer at kung magkano pa ang balance
 def record_payment(order_id, amount, method="Cash"):
     conn = get_conn(); cur = conn.cursor()
     cur.execute("INSERT INTO payments (order_id, amount, method) VALUES (?,?,?)", (order_id, amount, method))
     conn.commit(); conn.close()
 
-
+#  function para i-calculate yung total payments ng order, gagamitin natin to sa Order Details para makita kung magkano na ang binayaran ng customer at kung magkano pa ang balance
 def payments_total(order_id):
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT COALESCE(SUM(amount),0) as paid FROM payments WHERE order_id=?", (order_id,))
     r = cur.fetchone(); conn.close()
     return r['paid'] if r else 0
 
-
+# functions para sa ReportsFrame, dito natin nilalagay yung mga queries para makuha yung data na ipapakita dun sa ReportsFrame, tulad ng mga orders na in progress, ready today, revenue today, at iba pa
 def orders_in_progress():
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT * FROM orders WHERE status IN ('Received','Washing','Drying') ORDER BY received_at DESC")
     rows = cur.fetchall(); conn.close()
     return [dict(r) for r in rows]
 
-
+# function para makuha yung mga orders na ready today, gagamitin natin to sa ReportsFrame para makita ng user kung ilan na ang ready for pickup ngayon
 def orders_ready_today():
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT o.* FROM orders o WHERE o.status='Ready' AND date(o.ready_at)=date('now','localtime')")
     rows = cur.fetchall(); conn.close()
     return [dict(r) for r in rows]
 
-
+# function para makuha yung mga orders na received today, gagamitin natin to sa ReportsFrame para makita ng user kung ilan ang bagong orders na pumasok ngayon
 def orders_received_today():
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT o.* FROM orders o WHERE date(o.received_at)=date('now','localtime')")
     rows = cur.fetchall(); conn.close()
     return [dict(r) for r in rows]
 
-
+# function para i-calculate yung total revenue today, gagamitin natin to sa ReportsFrame para makita ng user kung magkano na ang kinita ng shop ngayon
 def total_revenue_today():
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT COALESCE(SUM(amount),0) as total FROM payments WHERE date(paid_at)=date('now','localtime')")
     r = cur.fetchone(); conn.close()
     return r['total'] if r else 0
 
-
+# function para makuha yung mga overdue orders, ibig sabihin yung mga orders na ready na pero hindi pa na-release at lumampas na sa ready date, gagamitin natin to sa ReportsFrame para makita ng user kung may mga orders ba na overdue na dapat i-follow up
 def overdue_orders():
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT * FROM orders WHERE status='Ready' AND released_at IS NULL AND date(ready_at) < date('now','localtime')")
     rows = cur.fetchall(); conn.close()
     return [dict(r) for r in rows]
 
-
+# function para makuha yung mga most frequent services, gagamitin natin to sa ReportsFrame para makita ng user kung ano yung mga services na madalas i-avail ng customers
 def most_frequent_services(limit=10):
     conn = get_conn(); cur = conn.cursor()
     cur.execute("""

@@ -3,15 +3,17 @@ from tkinter import ttk, messagebox
 import os
 import db
 
-
+# Dito natin ilalagay yung mga frames na gagamitin natin sa app, pwede pa magdagdag ng frames kung gusto mo
 class NewOrderFrame(ttk.Frame):
+    # Dito yung frame para sa paggawa ng bagong order, Class Name: NewOrderFrame
     def __init__(self, parent, app):
-        super().__init__(parent)
+        super().__init__(parent) 
         self.app = app
         self.services = db.list_services()
         self.items = []
         self.build()
 
+    # build method for NewOrderFrame, design of the layout frame
     def build(self):
         frm = ttk.LabelFrame(self, text='New Order')
         frm.pack(fill='both', expand=True, padx=10, pady=10)
@@ -52,6 +54,7 @@ class NewOrderFrame(ttk.Frame):
 
         ttk.Button(frm, text='Create Order', command=self.create_order).grid(row=row, column=1, sticky='e')
 
+    # Method for adding item to the order, pag pinindot yung add item button sa NewOrderFrame
     def add_item(self):
         sel = self.service_cb.get()
         if not sel:
@@ -64,6 +67,7 @@ class NewOrderFrame(ttk.Frame):
         self.items.append({'service_id': service['id'], 'service_name': service['name'], 'quantity': qty})
         self.items_tv.insert('', 'end', values=(service['name'], qty, service['unit_price'] * qty))
 
+    # Method for creating order, pag pinindot yung create order button sa NewOrderFrame
     def create_order(self):
         name = self.name_entry.get().strip()
         if not name:
@@ -79,13 +83,15 @@ class NewOrderFrame(ttk.Frame):
         self.name_entry.delete(0, 'end')
         self.phone_entry.delete(0, 'end')
 
-
+# Dito yung frame para sa pagtingin ng mga orders, Class Name: OrdersFrame
 class OrdersFrame(ttk.Frame):
+    # Dito yung frame para sa pagtingin ng mga orders, dito mo makikita lahat ng orders at pwede mo rin i-update status ng order at mag-record ng payment
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
         self.build()
 
+    # Method for building the layout of OrdersFrame
     def build(self):
         frm = ttk.Frame(self)
         frm.pack(fill='both', expand=True, padx=10, pady=10)
@@ -103,15 +109,18 @@ class OrdersFrame(ttk.Frame):
         ttk.Button(btns, text='Record Payment', command=self.record_payment).pack(side='left')
         self.refresh()
 
+    # Method for refreshing the orders list, pag pinindot yung refresh button sa OrdersFrame
     def refresh(self):
         for r in self.tv.get_children():
             self.tv.delete(r)
         for o in db.list_orders():
             self.tv.insert('', 'end', iid=o['id'], values=(o['id'], o['uuid'], o['customer_name'] or 'Walk-in', o['status'], o['received_at'], o['total']))
 
+    # Method for handling selection of an order in the list, pag pinindot yung isang order sa OrdersFrame
     def on_select(self, event):
         pass
 
+    # Method for changing the status of an order, pag pinindot yung mark ready or release button sa OrdersFrame
     def change_status(self, new_status):
         sel = self.tv.selection()
         if not sel:
@@ -121,6 +130,7 @@ class OrdersFrame(ttk.Frame):
         db.update_order_status(oid, new_status)
         self.refresh()
 
+    # Method for recording payment for an order, pag pinindot yung record payment button sa OrdersFrame
     def record_payment(self):
         sel = self.tv.selection()
         if not sel:
@@ -144,12 +154,15 @@ class OrdersFrame(ttk.Frame):
         ttk.Button(pw, text='OK', command=do).pack(side='left')
 
 
+# Dito yung frame para sa pagtingin ng mga reports, Class Name: ReportsFrame
 class ReportsFrame(ttk.Frame):
+    # Dito yung frame para sa pagtingin ng mga reports, dito mo makikita yung mga reports ng shop, pwede mo i-click yung buttons para makita yung mga reports na gusto mo
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
         self.build()
 
+    # Method for building the layout of ReportsFrame
     def build(self):
         frm = ttk.Frame(self)
         frm.pack(fill='both', expand=True, padx=10, pady=10)
@@ -162,35 +175,41 @@ class ReportsFrame(ttk.Frame):
         self.out = tk.Text(frm, height=20)
         self.out.pack(fill='both', expand=True)
 
+    # Methods for showing different reports, pag pinindot yung mga buttons sa ReportsFrame
     def show_in_progress(self):
         rows = db.orders_in_progress()
         self.out.delete('1.0', 'end')
         for r in rows:
             self.out.insert('end', f"{r['id']} {r['uuid']} {r['status']}\n")
 
+    # Method for showing in-progress orders report, pag pinindot yung in-progress orders button sa ReportsFrame
     def show_ready_today(self):
         rows = db.orders_ready_today()
         self.out.delete('1.0', 'end')
         for r in rows:
             self.out.insert('end', f"{r['id']} {r['uuid']} ready_at={r.get('ready_at')}\n")
 
+    # Method for showing ready today orders report, pag pinindot yung ready today button sa ReportsFrame
     def show_received_today(self):
         rows = db.orders_received_today()
         self.out.delete('1.0', 'end')
         for r in rows:
             self.out.insert('end', f"{r['id']} {r['uuid']} received_at={r.get('received_at')}\n")
 
+    # Method for showing received today orders report, pag pinindot yung received today button sa ReportsFrame
     def show_revenue_today(self):
         total = db.total_revenue_today()
         self.out.delete('1.0', 'end')
         self.out.insert('end', f"Revenue today: {total}\n")
 
+    # Method for showing revenue today report, pag pinindot yung revenue today button sa ReportsFrame
     def show_overdue(self):
         rows = db.overdue_orders()
         self.out.delete('1.0', 'end')
         for r in rows:
             self.out.insert('end', f"{r['id']} {r['uuid']} ready_at={r.get('ready_at')}\n")
 
+    # Method for showing overdue orders report, pag pinindot yung overdue button sa ReportsFrame
     def show_top_services(self):
         rows = db.most_frequent_services()
         self.out.delete('1.0', 'end')
