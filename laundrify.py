@@ -15,29 +15,19 @@ def main():
     
     page_title = "New Order"
     
-    #Header
-    label_header = tk.Label(
-        root, 
-        text=f"Laundrify - {page_title}", 
-        font=("Segoe UI", 24, "bold")
-    ).grid(row=0, column=0, columnspan=2, pady=20)
+    # Header
+    label_header = tk.Label(root, text=f"Laundrify - {page_title}", font=("Segoe UI", 24, "bold"))
+    label_header.grid(row=0, column=0, columnspan=2, pady=20)
     
-    frames = {}
+    # embed the frontend App into the existing root
+    import frontend
 
-    for F in (ui.NewOrderFrame, ui.OrdersFrame):
-        frame = F(root, root)
-        frame.grid(row=1, column=0, columnspan=2, sticky='nsew')
-        frames[F.__name__] = frame
-    
-    def show(name):
-        for f in frames.values():
-            f.grid_remove()
-        frames[name].grid()
-    
-    
-        
-    
-    
+    root.rowconfigure(1, weight=1)
+    def set_title(t):
+        label_header.config(text=t)
+
+    app = frontend.App(root, show_header=False, title_callback=set_title)
+    app.grid(row=1, column=0, columnspan=2, sticky='nsew')
 
     root.mainloop()
     
