@@ -62,13 +62,15 @@ class NewOrderPage(tk.Frame):
         super().__init__(parent, bd=1, relief="solid")
         # two-column main area like mockup
         self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=2)
+        self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
 
         left = tk.Frame(self, bd=1, relief="groove", padx=12, pady=12)
         left.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
         right = tk.Frame(self, bd=1, relief="groove", padx=12, pady=12)
         right.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(2, weight=1)
 
         # left form using grid only
         left.columnconfigure(1, weight=1)
