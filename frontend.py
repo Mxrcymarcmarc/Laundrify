@@ -62,7 +62,7 @@ class NewOrderPage(tk.Frame):
         super().__init__(parent, bd=1, relief="solid")
         # two-column main area like mockup
         self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=1)
+        self.columnconfigure(1, weight=2)
         self.rowconfigure(0, weight=1)
 
         left = tk.Frame(self, bd=1, relief="groove", padx=12, pady=12)
@@ -73,8 +73,9 @@ class NewOrderPage(tk.Frame):
         right.rowconfigure(2, weight=1)
 
         # left form using grid only
+        left.columnconfigure(0, minsize=80)
         left.columnconfigure(1, weight=1)
-        for i in range(8):
+        for i in range(10):
             left.rowconfigure(i, pad=6)
 
         tk.Label(left, text="Name:").grid(row=0, column=0, sticky="w")
@@ -93,25 +94,34 @@ class NewOrderPage(tk.Frame):
         self.phone_entry = tk.Entry(left)
         self.phone_entry.grid(row=3, column=1, sticky="ew")
 
-        tk.Label(left, text="Quantity:").grid(row=4, column=0, sticky="w")
-        self.qty_entry = tk.Entry(left)
-        self.qty_entry.grid(row=4, column=1, sticky="ew")
+        tk.Label(left, text="Service:").grid(row=4, column=0, sticky="w")
+        self.service_map = {
+            "Wash, Dry & Fold": ("weight", 70),
+            "Wash & Dry": ("weight", 50),
+            "Dry Cleaning": ("size", {"small": 110, "large": 150}),
+            "Ironing": ("size", {"small": 20, "large": 30})
+        }
+        self.service_combo = ttk.Combobox(left, values=list(self.service_map.keys()), state="readonly")
+        self.service_combo.grid(row=4, column=1, sticky="ew")
+        self.service_combo.bind("<<ComboboxSelected>>", self.on_service_selected)
 
-        tk.Label(left, text="Service:").grid(row=5, column=0, sticky="nw")
-        self.service_listbox = tk.Listbox(left, height=6, exportselection=False)
-        services = ["Wash & Fold","Dry Clean","Press","Alteration","Pickup/Delivery"]
-        for s in services:
-            self.service_listbox.insert("end", s)
-        self.service_listbox.grid(row=5, column=1, sticky="nsew")
-        left.rowconfigure(5, weight=1)
+        # Dynamic field frame (weight or size selection)
+        self.dynamic_frame = tk.Frame(left)
+        self.dynamic_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=6)
+        self.dynamic_frame.columnconfigure(0, minsize=80)
+        self.dynamic_frame.columnconfigure(1, weight=1)
+
+        tk.Label(left, text="Additional\nNotes:").grid(row=6, column=0, sticky="nw")
+        self.notes_text = tk.Text(left, height=3, width=30)
+        self.notes_text.grid(row=6, column=1, sticky="ew")
 
         add_btn = tk.Button(left, text="Add Item", command=self.add_item)
-        add_btn.grid(row=6, column=0, columnspan=2, pady=10)
+        add_btn.grid(row=7, column=0, columnspan=2, pady=10)
 
         # right - instructions and order items area
         tk.Label(right, text="Instruction", font=("TkDefaultFont", 10, "bold")).grid(row=0, column=0, sticky="w")
         instr_text = (
-            "To create an order: fill customer details, select a service and quantity, then press 'Add Item'.\n"
+            "To create an order: fill customer details, select a service, then enter weight or size, then press 'Add Item'.\n"
             "Items will appear below. Select an item and press 'Remove Item' to delete it.\n"
             "When ready, press 'Create Order' to save (not implemented)."
         )
@@ -136,22 +146,78 @@ class NewOrderPage(tk.Frame):
         remove_btn.grid(row=0, column=0, padx=8, sticky="ew")
         create_btn.grid(row=0, column=1, padx=8, sticky="ew")
 
-        # simple price map
-        self.price_map = {s: "00.00" for s in services}
+        self.weight_var = None
+        self.size_var = None
+
+    def on_service_selected(self, event=None):
+        # Clear previous widgets in dynamic frame
+        for widget in self.dynamic_frame.winfo_children():
+            widget.destroy()
+
+        service = self.service_combo.get()
+        if not service:
+            return
+
+        service_type, pricing = self.service_map[service]
+
+        if service_type == "weight":
+            # Show weight entry field
+            tk.Label(self.dynamic_frame, text="Weight (kg):").grid(row=0, column=0, sticky="w")
+            self.weight_var = tk.Entry(self.dynamic_frame)
+            self.weight_var.grid(row=0, column=1, sticky="ew")
+            self.size_var = None
+            self.qty_var = None
+
+        else:  # size-based
+            # Show radio buttons for small/large
+            tk.Label(self.dynamic_frame, text="Size:").grid(row=0, column=0, sticky="w")
+            self.size_var = tk.StringVar(value="small")
+            rb_frame = tk.Frame(self.dynamic_frame)
+            rb_frame.grid(row=0, column=1, sticky="ew")
+            tk.Radiobutton(rb_frame, text="Small", variable=self.size_var, value="small").pack(side="left", padx=5)
+            tk.Radiobutton(rb_frame, text="Large", variable=self.size_var, value="large").pack(side="left", padx=5)
+            
+            # Show quantity entry field
+            tk.Label(self.dynamic_frame, text="Quantity:").grid(row=1, column=0, sticky="w")
+            self.qty_var = tk.Entry(self.dynamic_frame)
+            self.qty_var.grid(row=1, column=1, sticky="ew")
+            self.weight_var = None
 
     def add_item(self):
-        sel = self.service_listbox.curselection()
-        if not sel:
+        service = self.service_combo.get()
+        if not service:
             return
-        service = self.service_listbox.get(sel[0])
-        qty = self.qty_entry.get().strip() or "1"
-        # validate qty numeric
-        try:
-            int(qty)
-        except ValueError:
-            qty = "1"
-        price = self.price_map.get(service, "00.00")
-        self.order_tree.insert("", "end", values=(service, qty, price))
+
+        service_type, pricing = self.service_map[service]
+        quantity = None
+        price = None
+
+        if service_type == "weight":
+            if not self.weight_var:
+                return
+            weight_str = self.weight_var.get().strip()
+            if not weight_str:
+                return
+            try:
+                weight = float(weight_str)
+                quantity = f"{weight} kg"
+                price = weight * pricing
+            except ValueError:
+                return
+        else:  # size-based
+            if not self.size_var or not self.qty_var:
+                return
+            qty_str = self.qty_var.get().strip() or "1"
+            try:
+                qty = int(qty_str)
+            except ValueError:
+                return
+            size = self.size_var.get()
+            price_per_item = pricing[size]
+            quantity = f"{qty}x {size.capitalize()}"
+            price = price_per_item * qty
+
+        self.order_tree.insert("", "end", values=(service, quantity, f"₱ {price:.2f}"))
 
     def remove_item(self):
         sel = self.order_tree.selection()
