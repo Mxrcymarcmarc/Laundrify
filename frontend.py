@@ -176,8 +176,100 @@ class ViewOrderPage(tk.Frame):
 class ReportsPage(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
-        tk.Label(self, text="Reports", font=("Helvetica", 16)).grid(row=0, column=0, padx=8, pady=8)
-        tk.Label(self, text="(Report content goes here)").grid(row=1, column=0, padx=8, pady=8)
+        self.rowconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
+        
+        # Tab buttons
+        tab_frame = tk.Frame(self, bd=1, relief="solid")
+        tab_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        tab_frame.columnconfigure((0,1,2,3,4), weight=1)
+        
+        self.current_tab = "revenue"
+        tabs = {
+            "revenue": "Revenue Today",
+            "received": "Received Today",
+            "ready": "Ready Today",
+            "overdue": "Overdue",
+            "services": "Top Services"
+        }
+        self.tab_buttons = {}
+        for key, label in tabs.items():
+            btn = tk.Button(tab_frame, text=label, command=lambda k=key: self.show_report(k))
+            btn.grid(row=0, column=list(tabs.keys()).index(key), sticky="ew", padx=4, pady=4)
+            self.tab_buttons[key] = btn
+        
+        # Chart canvas area
+        self.chart_frame = tk.Frame(self, bd=1, relief="groove")
+        self.chart_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        self.chart_frame.columnconfigure(0, weight=1)
+        self.chart_frame.rowconfigure(0, weight=1)
+        
+        self.canvas = None
+        self.show_report("revenue")
+    
+    def show_report(self, report_type):
+        # Clear previous chart
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+        
+        self.current_tab = report_type
+        
+        # Create matplotlib figure
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        if report_type == "revenue":
+            # Revenue Today - Line chart
+            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            revenue = [150, 200, 175, 300, 250, 280, 320]
+            ax.plot(days, revenue, marker='o', linewidth=2, markersize=8, color='#2ecc71')
+            ax.fill_between(range(len(days)), revenue, alpha=0.3, color='#2ecc71')
+            ax.set_title("Revenue Today", fontsize=14, fontweight='bold')
+            ax.set_ylabel("Amount ($)")
+            ax.grid(True, alpha=0.3)
+        
+        elif report_type == "received":
+            # Received Today - Bar chart
+            hours = ["6AM", "9AM", "12PM", "3PM", "6PM", "9PM"]
+            received = [5, 12, 18, 15, 22, 8]
+            ax.bar(hours, received, color='#3498db', alpha=0.7)
+            ax.set_title("Received Today", fontsize=14, fontweight='bold')
+            ax.set_ylabel("Orders")
+            ax.grid(True, alpha=0.3, axis='y')
+        
+        elif report_type == "ready":
+            # Ready Today - Bar chart
+            hours = ["6AM", "9AM", "12PM", "3PM", "6PM", "9PM"]
+            ready = [3, 10, 14, 12, 20, 6]
+            ax.bar(hours, ready, color='#f39c12', alpha=0.7)
+            ax.set_title("Ready Today", fontsize=14, fontweight='bold')
+            ax.set_ylabel("Orders")
+            ax.grid(True, alpha=0.3, axis='y')
+        
+        elif report_type == "overdue":
+            # Overdue - Pie chart
+            services = ["Wash & Fold", "Dry Clean", "Press", "Alteration"]
+            overdue_count = [5, 3, 2, 1]
+            ax.pie(overdue_count, labels=services, autopct='%1.1f%%', startangle=90)
+            ax.set_title("Overdue Orders by Service", fontsize=14, fontweight='bold')
+        
+        elif report_type == "services":
+            # Top Services - Horizontal bar chart
+            services = ["Wash & Fold", "Dry Clean", "Press", "Alteration", "Pickup/Delivery"]
+            count = [45, 32, 28, 15, 20]
+            ax.barh(services, count, color='#e74c3c', alpha=0.7)
+            ax.set_title("Top Services", fontsize=14, fontweight='bold')
+            ax.set_xlabel("Orders")
+            ax.grid(True, alpha=0.3, axis='x')
+        
+        fig.tight_layout()
+        
+        # Embed in tkinter
+        self.canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+
 
 
 if __name__ == "__main__":
