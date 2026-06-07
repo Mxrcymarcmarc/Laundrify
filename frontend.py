@@ -232,11 +232,204 @@ class NewOrderPage(tk.Frame):
 class ViewOrderPage(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
-        tk.Label(self, text="View Orders", font=("Helvetica", 16)).grid(row=0, column=0, padx=8, pady=8)
-        tree = ttk.Treeview(self, columns=("name","phone"), show="headings")
-        tree.heading("name", text="Name"); tree.heading("phone", text="Phone")
-        tree.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
-        self.rowconfigure(1, weight=1); self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
+        
+        # Tab buttons at top
+        tab_frame = tk.Frame(self, bd=1, relief="solid")
+        tab_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        tab_frame.columnconfigure((0,1,2), weight=1)
+        
+        self.current_tab = "unpaid"
+        btn_unpaid = tk.Button(tab_frame, text="Unpaid Orders", command=lambda: self.show_tab("unpaid"))
+        btn_status = tk.Button(tab_frame, text="Update Status", command=lambda: self.show_tab("status"))
+        btn_payment = tk.Button(tab_frame, text="Process Payment", command=lambda: self.show_tab("payment"))
+        
+        btn_unpaid.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        btn_status.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        btn_payment.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+        
+        # Main content frame
+        self.content_frame = tk.Frame(self)
+        self.content_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        self.content_frame.rowconfigure(0, weight=1)
+        self.content_frame.columnconfigure(0, weight=1)
+        
+        # Create tab pages
+        self.tab_frames = {}
+        self.create_unpaid_tab()
+        self.create_status_tab()
+        self.create_payment_tab()
+        
+        self.show_tab("unpaid")
+    
+    def create_unpaid_tab(self):
+        frame = tk.Frame(self.content_frame)
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.rowconfigure(2, weight=1)
+        frame.columnconfigure(0, weight=1)
+        self.tab_frames["unpaid"] = frame
+        
+        # Filter section
+        filter_frame = tk.Frame(frame)
+        filter_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        
+        tk.Label(filter_frame, text="Search:").grid(row=0, column=0, padx=5)
+        self.search_entry = tk.Entry(filter_frame, width=15)
+        self.search_entry.grid(row=0, column=1, padx=5)
+        
+        tk.Label(filter_frame, text="Status:").grid(row=0, column=2, padx=5)
+        self.status_combo = ttk.Combobox(filter_frame, values=["All", "Received", "In-Progress", "Ready", "Released"], width=12)
+        self.status_combo.current(0)
+        self.status_combo.grid(row=0, column=3, padx=5)
+        
+        tk.Label(filter_frame, text="Date From:").grid(row=0, column=4, padx=5)
+        self.date_from = tk.Entry(filter_frame, width=12)
+        self.date_from.insert(0, "mm/dd/yyyy")
+        self.date_from.grid(row=0, column=5, padx=5)
+        
+        tk.Label(filter_frame, text="To:").grid(row=0, column=6, padx=5)
+        self.date_to = tk.Entry(filter_frame, width=12)
+        self.date_to.insert(0, "mm/dd/yyyy")
+        self.date_to.grid(row=0, column=7, padx=5)
+        
+        refresh_btn = tk.Button(filter_frame, text="Refresh", width=10)
+        refresh_btn.grid(row=0, column=8, padx=10)
+        
+        # Table
+        table_frame = tk.Frame(frame)
+        table_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        table_frame.rowconfigure(0, weight=1)
+        table_frame.columnconfigure(0, weight=1)
+        
+        scrollbar = ttk.Scrollbar(table_frame)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        columns = ("OrderID", "Date Received", "Customer", "Service", "Qty/Wt", "Status", "Total", "Paid")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.tree.yview)
+        
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=110)
+        
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        
+        # Sample data
+        self.tree.insert("", "end", values=(1001, "06/01/2026", "Juan Dela Cruz", "Wash & Fold", "5kg", "Received", "₱350", "No"))
+        self.tree.insert("", "end", values=(1002, "06/02/2026", "Maria Santos", "Dry Clean", "3 pcs", "In-Progress", "₱330", "Yes"))
+        self.tree.insert("", "end", values=(1003, "06/03/2026", "Pedro Cruz", "Ironing", "10 pcs", "Ready", "₱300", "No"))
+        
+        # Bottom section with legend and buttons
+        bottom_frame = tk.Frame(frame)
+        bottom_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=10)
+        
+        legend_label = tk.Label(bottom_frame, text="Legend (Status):")
+        legend_label.pack(side="left", padx=5)
+        
+        statuses = ["Received", "In-Progress", "Ready", "Released"]
+        for status in statuses:
+            tk.Button(bottom_frame, text=status, width=12).pack(side="left", padx=3)
+    
+    def create_status_tab(self):
+        frame = tk.Frame(self.content_frame)
+        frame.grid(row=0, column=0, sticky="nsew")
+        self.tab_frames["status"] = frame
+        
+        tk.Label(frame, text="Update Order Status", font=("Arial", 14, "bold")).pack(pady=20)
+        
+        # Order selection
+        tk.Label(frame, text="Select Order:").pack(pady=5)
+        self.status_order_combo = ttk.Combobox(frame, values=["1001", "1002", "1003"], width=20)
+        self.status_order_combo.pack(pady=5)
+        
+        tk.Label(frame, text="New Status:").pack(pady=5)
+        self.new_status_combo = ttk.Combobox(frame, values=["Received", "In-Progress", "Ready", "Released"], width=20)
+        self.new_status_combo.pack(pady=5)
+        
+        tk.Button(frame, text="Update Status", command=self.update_status, width=20).pack(pady=20)
+    
+    def create_payment_tab(self):
+        frame = tk.Frame(self.content_frame)
+        frame.grid(row=0, column=0, sticky="nsew")
+        self.tab_frames["payment"] = frame
+        
+        tk.Label(frame, text="Process Payment", font=("Arial", 14, "bold")).pack(pady=20)
+        
+        # Order selection
+        tk.Label(frame, text="Select Order:").pack(pady=5)
+        self.payment_order_combo = ttk.Combobox(frame, values=["1001", "1002", "1003"], width=20)
+        self.payment_order_combo.pack(pady=5)
+        
+        tk.Label(frame, text="Amount Due:").pack(pady=5)
+        self.amount_due = tk.Entry(frame, width=20)
+        self.amount_due.pack(pady=5)
+        
+        tk.Label(frame, text="Cash Received:").pack(pady=5)
+        self.cash_received = tk.Entry(frame, width=20)
+        self.cash_received.pack(pady=5)
+        
+        tk.Button(frame, text="Calculate Change", command=self.open_payment_window, width=20).pack(pady=20)
+    
+    def show_tab(self, tab_name):
+        self.current_tab = tab_name
+        for key, frame in self.tab_frames.items():
+            if key == tab_name:
+                frame.tkraise()
+    
+    def update_status(self):
+        from tkinter import messagebox
+        order_id = self.status_order_combo.get()
+        new_status = self.new_status_combo.get()
+        
+        if not order_id or not new_status:
+            messagebox.showwarning("Error", "Please select an order and status")
+            return
+        
+        # Check if trying to mark as released without payment
+        if new_status == "Released":
+            messagebox.showerror("Error", "Cannot mark as Released. Order must be paid first.")
+            return
+        
+        messagebox.showinfo("Success", f"Order {order_id} status updated to {new_status}")
+    
+    def open_payment_window(self):
+        from tkinter import messagebox
+        order_id = self.payment_order_combo.get()
+        amount_str = self.amount_due.get()
+        cash_str = self.cash_received.get()
+        
+        if not order_id or not amount_str or not cash_str:
+            messagebox.showwarning("Error", "Please fill all fields and select an order")
+            return
+        
+        try:
+            amount = float(amount_str)
+            cash = float(cash_str)
+            change = cash - amount
+            
+            # Create payment window
+            payment_win = tk.Toplevel(self)
+            payment_win.title("Payment Summary")
+            payment_win.geometry("400x300")
+            
+            tk.Label(payment_win, text="PAYMENT SUMMARY", font=("Arial", 16, "bold")).pack(pady=15)
+            
+            detail_frame = tk.Frame(payment_win)
+            detail_frame.pack(padx=20, pady=10)
+            
+            tk.Label(detail_frame, text=f"Order ID: {order_id}", font=("Arial", 12)).pack(pady=5)
+            tk.Label(detail_frame, text=f"Amount Due: ₱ {amount:.2f}", font=("Arial", 12)).pack(pady=5)
+            tk.Label(detail_frame, text=f"Cash Received: ₱ {cash:.2f}", font=("Arial", 12)).pack(pady=5)
+            
+            if change >= 0:
+                tk.Label(detail_frame, text=f"Change: ₱ {change:.2f}", font=("Arial", 12, "bold"), fg="green").pack(pady=5)
+                tk.Button(payment_win, text="Confirm Payment", command=payment_win.destroy, width=20).pack(pady=20)
+            else:
+                tk.Label(detail_frame, text=f"Insufficient Payment: ₱ {abs(change):.2f} short", font=("Arial", 12, "bold"), fg="red").pack(pady=5)
+            
+        except ValueError:
+            messagebox.showerror("Error", "Please enter valid amounts")
 
 
 class ReportsPage(tk.Frame):
