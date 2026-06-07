@@ -374,7 +374,7 @@ class ViewOrderPage(tk.Frame):
         self.columnconfigure(0, weight=1)
         
         # Main border frame
-        main_frame = tk.Frame(self, bd=2, relief="solid")
+        main_frame = tk.Frame(self, bd=1, relief="solid")
         main_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         main_frame.rowconfigure(2, weight=1)
         main_frame.columnconfigure(0, weight=1)
