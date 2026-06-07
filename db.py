@@ -2,7 +2,6 @@ import sqlite3
 
 def init_db():
     tables = [
-        #Table initialization for Customer Information
         """
         CREATE TABLE IF NOT EXISTS CUSTOMERS (
             CustomerID INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -13,7 +12,6 @@ def init_db():
             Address TEXT NOT NULL
         )
         """,
-        #Table initialization for Services Information
         """
         CREATE TABLE IF NOT EXISTS SERVICES (
             ServiceID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,7 +19,6 @@ def init_db():
             Service_Unit_Price INTEGER NOT NULL
         )
         """,
-        #Table initialization for Orders Basic Information
         """
         CREATE TABLE IF NOT EXISTS ORDERS (
             OrderID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,10 +30,9 @@ def init_db():
             Order_Released_At TEXT NULL,
             Order_Payed_At TEXT NULL,
             Order_Notes TEXT NULL,
-    
             FOREIGN KEY (CustomerID) REFERENCES CUSTOMERS(CustomerID)
+        )
         """,
-        #Table initialization for Orders Information
         """
         CREATE TABLE IF NOT EXISTS ORDER_DETAILS (
             OrderDetailID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,28 +40,247 @@ def init_db():
             ServiceID INTEGER NOT NULL,
             Order_Subtotal INTEGER NOT NULL,
             Item_Weight INTEGER NOT NULL,
-   
             FOREIGN KEY (OrderID) REFERENCES ORDERS(OrderID),
             FOREIGN KEY (ServiceID) REFERENCES SERVICES(ServiceID)
-         
+        )
         """,
-        #Table initialization for Payment Information
         """
         CREATE TABLE IF NOT EXISTS PAYMENTS (
             PaymentID INTEGER PRIMARY KEY AUTOINCREMENT,
             OrderID INTEGER NOT NULL,
             Amount_Paid INTEGER NOT NULL,
             Payment_Date TEXT NOT NULL,
-            
             FOREIGN KEY (OrderID) REFERENCES ORDERS(OrderID)
         )
         """,
     ]
 
     with sqlite3.connect("Laundrify.db") as conn:
-            cursor = conn.cursor()
-            # Loop and execute each one
-            for table_query in tables:
-                cursor.execute(table_query)
-            conn.commit()
+        cursor = conn.cursor()
+        for table_query in tables:
+            cursor.execute(table_query)
+        conn.commit()
+
+def get_orders():
+    """Fetch all orders with their details"""
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   c.First_Name, c.Last_Name
+            FROM ORDERS o
+            JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
+            ORDER BY o.Order_Received_At DESC
+        """)
+        return cursor.fetchall()
+
+def get_unpaid_orders():
+    """Fetch orders that have not been paid yet"""
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   c.First_Name, c.Last_Name
+            FROM ORDERS o
+            JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
+            WHERE o.Order_Payed_At IS NULL
+            ORDER BY o.Order_Received_At DESC
+        """)
+        return cursor.fetchall()
+
+def get_order_details(order_id):
+    """Fetch detailed information about a specific order"""
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.*, c.First_Name, c.Last_Name, c.Phone_Number
+            FROM ORDERS o
+            JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
+            WHERE o.OrderID = ?
+        """, (order_id,))
+        return cursor.fetchone()
+
+def is_order_paid(order_id):
+    """Check if an order has been paid"""
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT Order_Payed_At FROM ORDERS WHERE OrderID = ?", (order_id,))
+        result = cursor.fetchone()
+        return result and result[0] is not None
+
+def get_order_services(order_id):
+    """Get unique service names for an order
+    
+    Returns:
+        str: Service name if single service, "Mixed Services" if multiple
+    """
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT s.Service_Type
+            FROM ORDER_DETAILS od
+            JOIN SERVICES s ON od.ServiceID = s.ServiceID
+            WHERE od.OrderID = ?
+        """, (order_id,))
+        services = cursor.fetchall()
         
+        if len(services) == 1:
+            return services[0][0]
+        elif len(services) > 1:
+            return "Mixed Services"
+        else:
+            return "Unknown"
+
+
+def update_order_status(order_id, new_status):
+    """Update order status with business rule validation
+    
+    Statuses allowed: Received, In-Progress, Ready, Released
+    Rule: Cannot mark as Released if order has not been paid
+    """
+    from datetime import datetime
+    
+    if new_status == "Released" and not is_order_paid(order_id):
+        raise ValueError("Cannot mark order as Released. Order must be paid first.")
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        cursor.execute(
+            "UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?",
+            (new_status, order_id)
+        )
+        
+        if new_status == "Ready":
+            cursor.execute(
+                "UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ?",
+                (timestamp, order_id)
+            )
+        
+        if new_status == "Released":
+            cursor.execute(
+                "UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ?",
+                (timestamp, order_id)
+            )
+        
+        conn.commit()
+        return True
+
+def process_payment(order_id, amount_paid):
+    """Process payment for an order
+    
+    Returns: dict with keys 'success', 'total_amount', 'change', 'message'
+    """
+    from datetime import datetime
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT Order_Total_Price FROM ORDERS WHERE OrderID = ?", (order_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return {
+                'success': False,
+                'message': 'Order not found'
+            }
+        
+        total_amount = result[0]
+        
+        if amount_paid < total_amount:
+            return {
+                'success': False,
+                'total_amount': total_amount,
+                'paid_amount': amount_paid,
+                'short_amount': total_amount - amount_paid,
+                'message': f'Insufficient payment. Short by ₱{total_amount - amount_paid:.2f}'
+            }
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        cursor.execute(
+            "INSERT INTO PAYMENTS (OrderID, Amount_Paid, Payment_Date) VALUES (?, ?, ?)",
+            (order_id, amount_paid, timestamp)
+        )
+        
+        cursor.execute(
+            "UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?",
+            (timestamp, order_id)
+        )
+        
+        conn.commit()
+        
+        change = amount_paid - total_amount
+        return {
+            'success': True,
+            'total_amount': total_amount,
+            'paid_amount': amount_paid,
+            'change': change,
+            'message': 'Payment processed successfully'
+        }
+
+def create_or_get_customer(first_name, last_name, phone_number, email="", address=""):
+    """Create a new customer or get existing customer by phone number"""
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT CustomerID FROM CUSTOMERS WHERE Phone_Number = ?", (phone_number,))
+        result = cursor.fetchone()
+        
+        if result:
+            return result[0]
+        
+        cursor.execute(
+            "INSERT INTO CUSTOMERS (First_Name, Last_Name, Phone_Number, Email, Address) VALUES (?, ?, ?, ?, ?)",
+            (first_name, last_name, phone_number, email, address)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+def create_order(customer_id, total_price, items, notes=""):
+    """Create a new order with items
+    
+    items: list of dicts with keys 'service', 'quantity', 'subtotal'
+    Returns: order_id
+    """
+    from datetime import datetime
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        cursor.execute(
+            """INSERT INTO ORDERS (CustomerID, Order_Status, Order_Total_Price, 
+               Order_Received_At, Order_Notes) 
+               VALUES (?, ?, ?, ?, ?)""",
+            (customer_id, "Received", total_price, timestamp, notes)
+        )
+        order_id = cursor.lastrowid
+        
+        for item in items:
+            cursor.execute("SELECT ServiceID FROM SERVICES WHERE Service_Type = ?", (item['service'],))
+            service_result = cursor.fetchone()
+            
+            if service_result:
+                service_id = service_result[0]
+            else:
+                cursor.execute(
+                    "INSERT INTO SERVICES (Service_Type, Service_Unit_Price) VALUES (?, ?)",
+                    (item['service'], 0)
+                )
+                service_id = cursor.lastrowid
+            
+            cursor.execute(
+                """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight) 
+                   VALUES (?, ?, ?, ?)""",
+                (order_id, service_id, item['subtotal'], item.get('quantity', 0))
+            )
+        
+        conn.commit()
+        return order_id

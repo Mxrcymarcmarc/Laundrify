@@ -4,6 +4,9 @@ import os
 import db
 
 def main():
+    # Initialize database
+    db.init_db()
+    
     root = tk.Tk()
     root.title('Laundrify')
     root.geometry('1500x800')
