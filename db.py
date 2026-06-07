@@ -284,3 +284,71 @@ def create_order(customer_id, total_price, items, notes=""):
         
         conn.commit()
         return order_id
+
+def get_revenue_report_data():
+    day_mapping = {
+        '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', 
+        '5': 'Fri', '6': 'Sat', '0': 'Sun'
+    }
+    
+    results_dict = {day: 0 for day in day_mapping.values()}
+    
+    query = """
+        SELECT 
+            strftime('%w', Payment_Date) as day_num,
+            SUM(Amount_Paid) as total_revenue
+        FROM PAYMENTS
+        WHERE Payment_Date >= date('now', 'weekday 0', '-7 days')
+        GROUP BY day_num
+    """
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        raw_data = cursor.fetchall()
+        
+    for day_num, total in raw_data:
+        day_name = day_mapping.get(day_num)
+        if day_name:
+            results_dict[day_name] = total
+            
+    ordered_days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    ordered_revenue = [results_dict[day] for day in ordered_days]
+    
+    return ordered_days, ordered_revenue
+
+def get_received_report_data():
+    target_hours = ["06", "09", "12", "15", "18", "21"]
+    results_dict = {hr: 0 for hr in target_hours}
+    
+    query = """
+        SELECT 
+            strftime('%H', Order_Received_At) as order_hour,
+            COUNT(OrderID) as order_count
+        FROM ORDERS
+        WHERE date(Order_Received_At) = date('now')
+        GROUP BY order_hour
+    """
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        raw_data = cursor.fetchall()
+        
+    for raw_hour, count in raw_data:
+        hour_int = int(raw_hour)
+        if hour_int < 9: bucket = "06"
+        elif hour_int < 12: bucket = "09"
+        elif hour_int < 15: bucket = "12"
+        elif hour_int < 18: bucket = "15"
+        elif hour_int < 21: bucket = "18"
+        else: bucket = "21"
+        
+        results_dict[bucket] += count
+
+    display_mapping = {"06": "6AM", "09": "9AM", "12": "12PM", "15": "3PM", "18": "6PM", "21": "9PM"}
+    
+    hours_labels = [display_mapping[hr] for hr in target_hours]
+    order_counts = [results_dict[hr] for hr in target_hours]
+    
+    return hours_labels, order_counts

@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+from db import get_received_report_data, get_revenue_report_data
+
 class App(tk.Frame):
     def __init__(self, parent, show_header=True, backend=None, title_callback=None):
         super().__init__(parent)
@@ -710,7 +712,7 @@ class ViewOrderPage(tk.Frame):
                 # Create styled summary window
                 summary_win = tk.Toplevel(payment_win)
                 summary_win.title("Payment Summary")
-                summary_win.geometry("450x400")
+                summary_win.geometry("450x500")
                 summary_win.resizable(False, False)
                 summary_win.grab_set()
                 
@@ -821,8 +823,8 @@ class ReportsPage(tk.Frame):
         
         if report_type == "revenue":
             # Revenue Today - Line chart
-            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-            revenue = [150, 200, 175, 300, 250, 280, 320]
+            days, revenue = get_revenue_report_data()
+            
             ax.plot(days, revenue, marker='o', linewidth=2, markersize=8, color='#2ecc71')
             ax.fill_between(range(len(days)), revenue, alpha=0.3, color='#2ecc71')
             ax.set_title("Revenue Today", fontsize=14, fontweight='bold')
@@ -831,8 +833,7 @@ class ReportsPage(tk.Frame):
         
         elif report_type == "received":
             # Received Today - Bar chart
-            hours = ["6AM", "9AM", "12PM", "3PM", "6PM", "9PM"]
-            received = [5, 12, 18, 15, 22, 8]
+            hours, received = get_received_report_data()
             ax.bar(hours, received, color='#3498db', alpha=0.7)
             ax.set_title("Received Today", fontsize=14, fontweight='bold')
             ax.set_ylabel("Orders")
