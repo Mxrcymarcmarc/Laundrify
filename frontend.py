@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from db import get_received_report_data, get_revenue_report_data
+from db import get_received_report_data, get_revenue_report_data, get_ready_report_data, get_overdue_report_data, get_top_services_report_data
 
 class App(tk.Frame):
     def __init__(self, parent, show_header=True, backend=None, title_callback=None):
@@ -366,8 +366,6 @@ class NewOrderPage(tk.Frame):
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to create order: {str(e)}")
-
-
 
 class ViewOrderPage(tk.Frame):
     def __init__(self, parent, controller):
@@ -841,28 +839,39 @@ class ReportsPage(tk.Frame):
         
         elif report_type == "ready":
             # Ready Today - Bar chart
-            hours = ["6AM", "9AM", "12PM", "3PM", "6PM", "9PM"]
-            ready = [3, 10, 14, 12, 20, 6]
+            hours, ready = get_ready_report_data()  
             ax.bar(hours, ready, color='#f39c12', alpha=0.7)
             ax.set_title("Ready Today", fontsize=14, fontweight='bold')
             ax.set_ylabel("Orders")
             ax.grid(True, alpha=0.3, axis='y')
         
         elif report_type == "overdue":
-            # Overdue - Pie chart
-            services = ["Wash & Fold", "Dry Clean", "Press", "Alteration"]
-            overdue_count = [5, 3, 2, 1]
-            ax.pie(overdue_count, labels=services, autopct='%1.1f%%', startangle=90)
-            ax.set_title("Overdue Orders by Service", fontsize=14, fontweight='bold')
-        
+            services, overdue_count = get_overdue_report_data()
+            
+            if not services:
+                ax.text(0.5, 0.5, "All caught up!\nNo overdue orders.", 
+                        horizontalalignment='center', verticalalignment='center', 
+                        fontsize=12, fontweight='bold', color='#2ed573')
+                ax.set_title("Overdue Orders by Service", fontsize=14, fontweight='bold')
+                ax.axis('off')
+            else:
+                ax.pie(overdue_count, labels=services, autopct='%1.1f%%', startangle=90,
+                    colors=['#e74c3c', '#e67e22', '#f1c40f', '#3498db'])
+                ax.set_title("Overdue Orders by Service", fontsize=14, fontweight='bold')
+
         elif report_type == "services":
-            # Top Services - Horizontal bar chart
-            services = ["Wash & Fold", "Dry Clean", "Press", "Alteration", "Pickup/Delivery"]
-            count = [45, 32, 28, 15, 20]
-            ax.barh(services, count, color='#e74c3c', alpha=0.7)
-            ax.set_title("Top Services", fontsize=14, fontweight='bold')
-            ax.set_xlabel("Orders")
-            ax.grid(True, alpha=0.3, axis='x')
+            services, count = get_top_services_report_data()
+    
+            if not services:
+                ax.text(0.5, 0.5, "No orders recorded yet to calculate top services.", 
+                        horizontalalignment='center', verticalalignment='center', fontsize=12)
+                ax.set_title("Top Services", fontsize=14, fontweight='bold')
+                ax.axis('off')
+            else:
+                ax.barh(services, count, color='#e74c3c', alpha=0.7, height=0.5)
+                ax.set_title("Top Services", fontsize=14, fontweight='bold')
+                ax.set_xlabel("Orders")
+                ax.grid(True, alpha=0.3, axis='x') 
         
         fig.tight_layout()
         

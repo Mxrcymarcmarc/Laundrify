@@ -354,89 +354,33 @@ def get_received_report_data():
     return hours_labels, order_counts
 
 def get_ready_report_data():
-    target_hours = ["06", "09", "12", "15", "18", "21"]
-    results_dict = {hr: 0 for hr in target_hours}
+    # 1. Define your standard time intervals to match the chart
+    hours = ["6AM", "9AM", "12PM", "3PM", "6PM", "9PM"]
+    # Initialize counts for each time slot to 0
+    ready_counts = [0, 0, 0, 0, 0, 0]
     
-    # Tailored to your exact schema columns: Order_Ready_At and Order_Status
     query = """
-        SELECT 
-            strftime('%H', Order_Ready_At) as ready_hour,
-            COUNT(OrderID) as order_count
-        FROM ORDERS
-        WHERE Order_Status = 'Ready'
-          AND date(Order_Ready_At) = date('now')
-        GROUP BY ready_hour
+    SELECT strftime('%H', Order_Ready_At) AS hour_digit, COUNT(OrderID)
+    FROM ORDERS
+    WHERE Status = 'Ready' AND date(Order_Ready_At) = date('now')
+    GROUP BY hour_digit
     """
     
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         cursor.execute(query)
-        raw_data = cursor.fetchall()
+        rows = cursor.fetchall()  
         
-    for raw_hour, count in raw_data:
-        if raw_hour is None:
-            continue
+        for row in rows:
+            db_hour = int(row[0])
+            count = row[1]
             
-        hour_int = int(raw_hour)
-        if hour_int < 9: bucket = "06"
-        elif hour_int < 12: bucket = "09"
-        elif hour_int < 15: bucket = "12"
-        elif hour_int < 18: bucket = "15"
-        elif hour_int < 21: bucket = "18"
-        else: bucket = "21"
-        
-        results_dict[bucket] += count
+            if db_hour < 9: ready_counts[0] += count     
+            elif db_hour < 12: ready_counts[1] += count  
+            elif db_hour < 15: ready_counts[2] += count  
+            elif db_hour < 18: ready_counts[3] += count  
+            elif db_hour < 21: ready_counts[4] += count  
+            else: ready_counts[5] += count               
+            
+    return hours, ready_counts
 
-    display_mapping = {"06": "6AM", "09": "9AM", "12": "12PM", "15": "3PM", "18": "6PM", "21": "9PM"}
-    
-    hours_labels = [display_mapping[hr] for hr in target_hours]
-    order_counts = [results_dict[hr] for hr in target_hours]
-    
-    return hours_labels, order_counts
-
-def get_overdue_report_data():
-    # We hop through ORDER_DETAILS (OD) to bridge ORDERS (O) and SERVICES (S)
-    query = """
-        SELECT 
-            S.Service_Type,
-            COUNT(O.OrderID) as order_count
-        FROM ORDERS O
-        JOIN ORDER_DETAILS OD ON O.OrderID = OD.OrderID
-        JOIN SERVICES S ON OD.ServiceID = S.ServiceID
-        WHERE O.Order_Status = 'Overdue'
-        GROUP BY S.Service_Type
-    """
-    
-    with sqlite3.connect("Laundrify.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute(query)
-        raw_data = cursor.fetchall()
-        
-    # Unpack into clean lists for your frontend pie chart
-    services = [row[0] for row in raw_data]
-    overdue_counts = [row[1] for row in raw_data]
-    
-    return services, overdue_counts
-
-def get_top_services_report_data():
-    # Counts occurrences of each service across all order details
-    query = """
-        SELECT 
-            S.Service_Type,
-            COUNT(OD.OrderDetailID) as order_count
-        FROM ORDER_DETAILS OD
-        JOIN SERVICES S ON OD.ServiceID = S.ServiceID
-        GROUP BY S.Service_Type
-        ORDER BY order_count ASC  -- ASC because ax.barh plots from bottom up
-    """
-    
-    with sqlite3.connect("Laundrify.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute(query)
-        raw_data = cursor.fetchall()
-        
-    # Unpack into clean arrays for Matplotlib
-    services = [row[0] for row in raw_data]
-    counts = [row[1] for row in raw_data]
-    
-    return services, counts
