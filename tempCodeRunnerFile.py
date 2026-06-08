@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import sqlite3
 
 def init_db():
@@ -384,3 +385,6 @@ def get_ready_report_data():
             
     return hours, ready_counts
 
+=======
+root.mainloop()
+>>>>>>> Stashed changes

@@ -351,6 +351,7 @@ def get_received_report_data():
     hours_labels = [display_mapping[hr] for hr in target_hours]
     order_counts = [results_dict[hr] for hr in target_hours]
     
+<<<<<<< Updated upstream
     return hours_labels, order_counts
 
 def get_ready_report_data():
@@ -440,3 +441,6 @@ def get_top_services_report_data():
     counts = [row[1] for row in raw_data]
     
     return services, counts
+=======
+    return hours_labels, order_counts
+>>>>>>> Stashed changes

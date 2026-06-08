@@ -1,7 +1,11 @@
 import tkinter as tk
 from tkinter import ttk
 
+<<<<<<< Updated upstream
 from db import get_received_report_data, get_revenue_report_data, get_ready_report_data, get_overdue_report_data, get_top_services_report_data
+=======
+from db import get_received_report_data, get_revenue_report_data
+>>>>>>> Stashed changes
 
 class App(tk.Frame):
     def __init__(self, parent, show_header=True, backend=None, title_callback=None):
