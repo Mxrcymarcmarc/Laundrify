@@ -2,8 +2,15 @@ import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
 
-from db import get_received_report_data, get_revenue_report_data, get_ready_report_data, get_overdue_report_data, get_top_services_report_data
+from db import get_received_report_data, get_revenue_report_data, get_ready_report_data, get_overdue_report_data, get_top_services_report_data, get_next_customer_id
 
+PRIMARY = "#F0EDE5"
+SECONDARY = "#4A6FA5"
+ACCENT = "#B8C5D6"
+HDR_TEXT = ("Cooper Black", 24)
+HDR2_TEXT = ("Arial Black", 15)
+TTL_TEXT = ("Arial", 11, "bold")
+REG_TEXT = ("Arial", 11)
 
 def reload_services_for_page(page):
     """Populate page.service_map from DB and refresh the service combobox values."""
@@ -45,22 +52,28 @@ class App(tk.Frame):
         super().__init__(parent)
         self.backend = backend
         self.title_callback = title_callback or (lambda t: None)
+        self.configure(bg=PRIMARY)
 
         # decide where to place content rows depending on header
-        content_row = 0 if not show_header else 1
+        content_row = 2 if show_header else 0
 
         if show_header:
-            header = tk.Label(self, text="Laundrify - {New Order}", font=("Helvetica", 24))
-            header.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+            header = tk.Label(self, text="Laundrify - {New Order}", font=("Helvetica", 24), bg=SECONDARY, fg="white")
+            header.grid(row=0, column=0, sticky="ew", padx=0, pady=(15))
+
+            separator = tk.Frame(self, height=4, bg=SECONDARY)
+            separator.grid(row=1, column=0, sticky="ew", padx=0, pady=(0,4))
+            separator.grid_propagate(False)
 
         # layout: content + nav
-        self.rowconfigure(content_row, weight=1)
         self.columnconfigure(0, weight=1)
+        self.rowconfigure(content_row, weight=1)
+        self.rowconfigure(content_row+1, weight=0)
 
         # container for pages
         container = tk.Frame(self)
-        container.grid(row=content_row, column=0, sticky="nsew", padx=8, pady=8)
-        container.rowconfigure(0, weight=1)
+        container.grid(row=content_row, column=0, sticky="ew", padx=8, pady=(8, 0))
+        container.rowconfigure(0, weight=0)
         container.columnconfigure(0, weight=1)
 
         # create pages
@@ -71,19 +84,19 @@ class App(tk.Frame):
             self.pages[Page.__name__] = page
 
         # bottom navigation
-        nav = tk.Frame(self)
-        nav.grid(row=content_row+1, column=0, sticky="ew", padx=8, pady=8)
+        nav = tk.Frame(self, bg=PRIMARY)
+        nav.grid(row=content_row+1, column=0, sticky="ew", padx=8, pady=15)
         nav.columnconfigure((0,1,2), weight=1)
 
         self.nav_buttons = {}
         self.current_page = "NewOrderPage"
         
-        btn_new = tk.Button(nav, text="New Order", command=lambda: self.show("NewOrderPage"), 
-                            font=("Arial", 10), height=2, cursor="hand2")
-        btn_view = tk.Button(nav, text="View Order", command=lambda: self.show("ViewOrderPage"), 
-                            font=("Arial", 10), height=2, cursor="hand2")
-        btn_reports = tk.Button(nav, text="Reports", command=lambda: self.show("ReportsPage"), 
-                               font=("Arial", 10), height=2, cursor="hand2")
+        btn_new = tk.Button(nav, text="New Order", font=TTL_TEXT, command=lambda: self.show("NewOrderPage"), 
+                            height=2, cursor="hand2")
+        btn_view = tk.Button(nav, text="View Order", font=TTL_TEXT, command=lambda: self.show("ViewOrderPage"), 
+                            height=2, cursor="hand2")
+        btn_reports = tk.Button(nav, text="Reports", font=TTL_TEXT, command=lambda: self.show("ReportsPage"), 
+                            height=2, cursor="hand2")
 
         self.nav_buttons["NewOrderPage"] = btn_new
         self.nav_buttons["ViewOrderPage"] = btn_view
@@ -105,9 +118,9 @@ class App(tk.Frame):
         self.current_page = name
         for page_name, btn in self.nav_buttons.items():
             if page_name == name:
-                btn.config(bg="#3498db", fg="white", activebackground="#2980b9", activeforeground="white", relief="sunken", bd=2)
+                btn.config(bg=SECONDARY, fg="white", activebackground=SECONDARY, activeforeground="white", relief="sunken", bd=2)
             else:
-                btn.config(bg="#95a5a6", fg="white", activebackground="#7f8c8d", activeforeground="white", relief="raised", bd=1)
+                btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief="raised", bd=1)
         
         # update outer header if provided
         self.title_callback(titles.get(name, "Laundrify"))
@@ -120,17 +133,18 @@ class App(tk.Frame):
         self.pages[name].tkraise()
 
 
-class NewOrderPage(tk.Frame):
+class NewOrderPage(tk.Frame):           
     def __init__(self, parent, controller):
-        super().__init__(parent, bd=1, relief="solid")
+        super().__init__(parent, bd=0, relief="solid")
         # two-column main area like mockup
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=2)
         self.rowconfigure(0, weight=1)
+        self.configure(bg=PRIMARY)
 
-        left = tk.Frame(self, bd=1, relief="groove", padx=12, pady=12)
+        left = tk.Frame(self, bd=1, padx=12, pady=12, bg=PRIMARY)
         left.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
-        right = tk.Frame(self, bd=1, relief="groove", padx=12, pady=12)
+        right = tk.Frame(self, bd=1, padx=12, pady=12, bg=PRIMARY)
         right.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(2, weight=1)
@@ -138,33 +152,38 @@ class NewOrderPage(tk.Frame):
         # left form using grid only
         left.columnconfigure(0, minsize=80)
         left.columnconfigure(1, weight=1)
-        for i in range(10):
-            left.rowconfigure(i, pad=6)
+        for i in range(2):
+            left.rowconfigure(i, pad=5)
+        for i in range(2, 10):
+            left.rowconfigure(i, pad=5)
 
-        tk.Label(left, text="First Name:").grid(row=0, column=0, sticky="w")
-        self.first_name_entry = tk.Entry(left)
-        self.first_name_entry.grid(row=0, column=1, sticky="ew")
+        cust_num = get_next_customer_id()
+        tk.Label(left, text=f"Customer Number: {cust_num}", font=HDR2_TEXT, bg=PRIMARY).grid(row=0, column=0, columnspan=2, sticky="w")
+        
+        tk.Label(left, text="First Name:", font=TTL_TEXT, bg=PRIMARY).grid(row=1, column=0, sticky="w")
+        self.first_name_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.first_name_entry.grid(row=1, column=1, sticky="ew", ipady=3)
 
-        tk.Label(left, text="Last Name:").grid(row=1, column=0, sticky="w")
-        self.last_name_entry = tk.Entry(left)
-        self.last_name_entry.grid(row=1, column=1, sticky="ew")
+        tk.Label(left, text="Last Name:", font=TTL_TEXT, bg=PRIMARY).grid(row=2, column=0, sticky="w")
+        self.last_name_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.last_name_entry.grid(row=2, column=1, sticky="ew", ipady=3)
 
-        tk.Label(left, text="Address:").grid(row=2, column=0, sticky="w")
-        self.address_entry = tk.Entry(left)
-        self.address_entry.grid(row=2, column=1, sticky="ew")
+        tk.Label(left, text="Address:", font=TTL_TEXT, bg=PRIMARY).grid(row=3, column=0, sticky="w")
+        self.address_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.address_entry.grid(row=3, column=1, sticky="ew", ipady=3)
 
-        tk.Label(left, text="Email:").grid(row=3, column=0, sticky="w")
-        self.email_entry = tk.Entry(left)
-        self.email_entry.grid(row=3, column=1, sticky="ew")
+        tk.Label(left, text="Email:", font=TTL_TEXT, bg=PRIMARY).grid(row=4, column=0, sticky="w")
+        self.email_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.email_entry.grid(row=4, column=1, sticky="ew", ipady=3)
 
-        tk.Label(left, text="Phone:").grid(row=4, column=0, sticky="w")
-        self.phone_entry = tk.Entry(left)
-        self.phone_entry.grid(row=4, column=1, sticky="ew")
+        tk.Label(left, text="Phone:", font=TTL_TEXT, bg=PRIMARY).grid(row=5, column=0, sticky="w")
+        self.phone_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.phone_entry.grid(row=5, column=1, sticky="ew", ipady=3)
         # Register phone validation - only numbers
         vcmd_phone = left.register(self.validate_phone)
         self.phone_entry.config(validate='key', validatecommand=(vcmd_phone, '%P'))
 
-        tk.Label(left, text="Service:").grid(row=5, column=0, sticky="w")
+        tk.Label(left, text="Service:", font=TTL_TEXT, bg=PRIMARY).grid(row=6, column=0, sticky="w")
         # default in-code service map (used for UI behavior). Prices will be updated from DB if available.
         self.service_map = {
             "Wash, Dry & Fold": ("weight", 70),
@@ -175,46 +194,46 @@ class NewOrderPage(tk.Frame):
         # Load services from DB and refresh combobox
         reload_services_for_page(self)
 
-        self.service_combo = ttk.Combobox(left, values=list(self.service_map.keys()), state="readonly")
-        self.service_combo.grid(row=5, column=1, sticky="ew")
+        self.service_combo = ttk.Combobox(left, values=list(self.service_map.keys()), state="readonly", font=REG_TEXT)
+        self.service_combo.grid(row=6, column=1, sticky="ew", ipady=3)
         self.service_combo.bind("<<ComboboxSelected>>", self.on_service_selected)
 
         # Dynamic field frame (weight or size selection)
-        self.dynamic_frame = tk.Frame(left)
-        self.dynamic_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=6)
+        self.dynamic_frame = tk.Frame(left, bg=PRIMARY)
+        self.dynamic_frame.grid(row=7, column=0, columnspan=2, sticky="ew", pady=6)
         self.dynamic_frame.columnconfigure(0, minsize=80)
         self.dynamic_frame.columnconfigure(1, weight=1)
         # unit price display (updated on service selection)
         self.unit_price_var = tk.StringVar()
-        unit_price_label = tk.Label(self.dynamic_frame, textvariable=self.unit_price_var, fg='#2c3e50')
+        unit_price_label = tk.Label(self.dynamic_frame, textvariable=self.unit_price_var, fg=SECONDARY)
         unit_price_label.grid(row=2, column=0, columnspan=2, sticky='w')
 
-        tk.Label(left, text="Additional\nNotes:").grid(row=7, column=0, sticky="nw")
-        self.notes_text = tk.Text(left, height=3, width=30)
-        self.notes_text.grid(row=7, column=1, sticky="ew")
+        tk.Label(left, text="Additional\nNotes:", font=TTL_TEXT, bg=PRIMARY).grid(row=8, column=0, sticky="nw")
+        self.notes_text = tk.Text(left, height=3, width=30, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.notes_text.grid(row=8, column=1, sticky="ew", ipady=3)
 
-        add_btn = tk.Button(left, text="Add Item", command=self.add_item)
-        add_btn.grid(row=8, column=0, columnspan=2, pady=10)
+        add_btn = tk.Button(left, text="Add Item", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.add_item, width=20)
+        add_btn.grid(row=9, column=0, columnspan=2, pady=10)
 
         # right - instructions and order items area
         # header with Instruction label and gear button on same row
-        header_frame = tk.Frame(right)
+        header_frame = tk.Frame(right, bg=PRIMARY)
         header_frame.grid(row=0, column=0, sticky="ew")
         header_frame.columnconfigure(0, weight=1)
         header_frame.columnconfigure(1, weight=0)
-        tk.Label(header_frame, text="Instruction", font=("TkDefaultFont", 10, "bold")).grid(row=0, column=0, sticky="w")
-        gear_btn = tk.Button(header_frame, text='⚙', width=3, command=self.open_services_window)
-        gear_btn.grid(row=0, column=1, sticky='ne', padx=(6,0), pady=(0,0))
+        tk.Label(header_frame, text="Instruction", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w")
+        gear_btn = tk.Button(header_frame, text='⚙', font=("Arial", 12), bg=SECONDARY, fg=PRIMARY, width=3, command=self.open_services_window)
+        gear_btn.grid(row=0, column=1, sticky='ne', padx=(6,0), )
 
         instr_text = (
             "To create an order: fill customer details, select a service, then enter weight or size, then press 'Add Item'.\n"
             "Items will appear below. Select an item and press 'Remove Item' to delete it.\n"
             "When ready, press 'Create Order' to save."
         )
-        instr_frame = tk.Frame(right)
+        instr_frame = tk.Frame(right, bg=PRIMARY)
         instr_frame.grid(row=1, column=0, sticky="ew", pady=6)
         instr_frame.columnconfigure(0, weight=1)
-        instr = tk.Label(instr_frame, text=instr_text, anchor="nw", justify="left", wraplength=420)
+        instr = tk.Label(instr_frame, text=instr_text, font=REG_TEXT, bg=PRIMARY, anchor="nw", justify="left", wraplength=800)
         instr.grid(row=0, column=0, sticky="w")
 
         # order items table
@@ -227,13 +246,15 @@ class NewOrderPage(tk.Frame):
         self.order_tree.grid(row=2, column=0, sticky="nsew", pady=6)
 
         # buttons under the table
-        btn_frame = tk.Frame(right)
+        btn_frame = tk.Frame(right, bg=PRIMARY)
         btn_frame.grid(row=3, column=0, sticky="ew", pady=(8,0))
-        btn_frame.columnconfigure((0,1), weight=1)
-        remove_btn = tk.Button(btn_frame, text="Remove Item", command=self.remove_item)
-        create_btn = tk.Button(btn_frame, text="Create Order", command=self.create_order)
-        remove_btn.grid(row=0, column=0, padx=8, sticky="ew")
-        create_btn.grid(row=0, column=1, padx=8, sticky="ew")
+        btn_frame.columnconfigure((0,1,2,3), weight=1)
+        remove_btn = tk.Button(btn_frame, text="Remove Item", font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=self.remove_item, width=5)
+        remove_btn.grid(row=0, column=0, sticky="ew")
+        clear_btn = tk.Button(btn_frame, text="Remove All Items", font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=self.remove_all_items, width=10)
+        clear_btn.grid(row=0, column=1, padx=8, sticky="ew")
+        create_btn = tk.Button(btn_frame, text="Create Order", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, highlightcolor=SECONDARY, command=self.create_order)
+        create_btn.grid(row=0, column=3, padx=(0, 0), sticky="ew")
 
         self.weight_var = None
         self.size_var = None
@@ -251,9 +272,9 @@ class NewOrderPage(tk.Frame):
 
         if service_type == "weight":
             # Show weight entry field
-            tk.Label(self.dynamic_frame, text="Weight (kg):").grid(row=0, column=0, sticky="w")
-            self.weight_var = tk.Entry(self.dynamic_frame)
-            self.weight_var.grid(row=0, column=1, sticky="ew")
+            tk.Label(self.dynamic_frame, text="Weight (kg):", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w")
+            self.weight_var = tk.Entry(self.dynamic_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+            self.weight_var.grid(row=0, column=1, sticky="ew", ipady=3)
             self.size_var = None
             self.qty_var = None
             # show unit price for weight service
@@ -266,20 +287,20 @@ class NewOrderPage(tk.Frame):
             # size-based or per-item
             if service_type == 'size':
                 # Show radio buttons for small/large
-                tk.Label(self.dynamic_frame, text="Size:").grid(row=0, column=0, sticky="w")
+                tk.Label(self.dynamic_frame, text="Size:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w")
                 self.size_var = tk.StringVar(value="small")
-                rb_frame = tk.Frame(self.dynamic_frame)
+                rb_frame = tk.Frame(self.dynamic_frame, bg=PRIMARY)
                 rb_frame.grid(row=0, column=1, sticky="ew")
-                tk.Radiobutton(rb_frame, text="Small", variable=self.size_var, value="small").pack(side="left", padx=5)
-                tk.Radiobutton(rb_frame, text="Large", variable=self.size_var, value="large").pack(side="left", padx=5)
+                tk.Radiobutton(rb_frame, text="Small", font=REG_TEXT, bg=PRIMARY, variable=self.size_var, value="small").pack(side="left", padx=5)
+                tk.Radiobutton(rb_frame, text="Large", font=REG_TEXT, bg=PRIMARY, variable=self.size_var, value="large").pack(side="left", padx=5)
                 
                 # Show quantity entry field
-                tk.Label(self.dynamic_frame, text="Quantity:").grid(row=1, column=0, sticky="w")
-                self.qty_var = tk.Entry(self.dynamic_frame)
+                tk.Label(self.dynamic_frame, text="Quantity:", font=TTL_TEXT, bg=PRIMARY).grid(row=1, column=0, sticky="w")
+                self.qty_var = tk.Entry(self.dynamic_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
                 # Register quantity validation - only numbers
                 vcmd_qty = self.dynamic_frame.register(self.validate_quantity)
                 self.qty_var.config(validate='key', validatecommand=(vcmd_qty, '%P'))
-                self.qty_var.grid(row=1, column=1, sticky="ew")
+                self.qty_var.grid(row=1, column=1, sticky="ew", ipady=3)
                 self.weight_var = None
                 # show price breakdown for sizes
                 try:
@@ -290,11 +311,11 @@ class NewOrderPage(tk.Frame):
                     self.unit_price_var.set("")
             else:
                 # per-item service: single quantity entry
-                tk.Label(self.dynamic_frame, text="Quantity:").grid(row=0, column=0, sticky="w")
-                self.qty_var = tk.Entry(self.dynamic_frame)
+                tk.Label(self.dynamic_frame, text="Quantity:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w")
+                self.qty_var = tk.Entry(self.dynamic_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
                 vcmd_qty = self.dynamic_frame.register(self.validate_quantity)
                 self.qty_var.config(validate='key', validatecommand=(vcmd_qty, '%P'))
-                self.qty_var.grid(row=0, column=1, sticky="ew")
+                self.qty_var.grid(row=0, column=1, sticky="ew", ipady=3)
                 self.weight_var = None
                 self.size_var = None
                 # show unit price
@@ -523,6 +544,21 @@ class NewOrderPage(tk.Frame):
                 self.phone_entry.config(state='normal')
             except Exception:
                 pass
+            
+    def remove_all_items(self):
+        all_iids = self.order_tree.get_children()
+
+        for iid in all_iids:
+            self.order_tree.delete(iid)
+    
+        try:
+            self.first_name_entry.config(state='normal')
+            self.last_name_entry.config(state='normal')
+            self.address_entry.config(state='normal')
+            self.email_entry.config(state='normal')
+            self.phone_entry.config(state='normal')
+        except Exception:
+            pass
 
     def create_order(self):
         from tkinter import messagebox
@@ -621,13 +657,14 @@ class ViewOrderPage(tk.Frame):
         super().__init__(parent)
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
+        self.configure(bg=SECONDARY)
 
         import db
         # per-cell overlay widgets for Action column
         self.action_overlays = {}
 
         # Main border frame
-        main_frame = tk.Frame(self, bd=1, relief="solid")
+        main_frame = tk.Frame(self, bd=1, relief="solid", bg=PRIMARY)
         main_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         # reserve notebook row for content
         main_frame.rowconfigure(3, weight=1)
@@ -642,40 +679,40 @@ class ViewOrderPage(tk.Frame):
         self.subheading_label.grid(row=0, column=0, sticky="w")
 
         # Action buttons on right
-        button_frame = tk.Frame(top_frame)
+        button_frame = tk.Frame(top_frame, bg=PRIMARY)
         button_frame.grid(row=0, column=1, sticky="e", padx=5, pady=5)
 
-        tk.Button(button_frame, text="Update Status", command=self.open_update_status_window, width=15, height=1).pack(side="left", padx=5)
-        tk.Button(button_frame, text="Process Payment", command=self.open_payment_window, width=15, height=1).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Update Status", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.open_update_status_window, width=15, height=1).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Process Payment", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.open_payment_window, width=15, height=1).pack(side="left", padx=5)
 
         # thin separator under heading (inside top_frame so filter_frame stays at previous row)
         sep1 = ttk.Separator(top_frame, orient='horizontal')
         sep1.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(8,0))
 
         # Filter section (return to previous position)
-        filter_frame = tk.Frame(main_frame)
+        filter_frame = tk.Frame(main_frame, bg=PRIMARY)
         filter_frame.grid(row=1, column=0, sticky="ew", padx=15, pady=10)
         filter_frame.columnconfigure(1, weight=0)
         filter_frame.columnconfigure(3, weight=0)
         filter_frame.columnconfigure(5, weight=0)
         filter_frame.columnconfigure(7, weight=0)
 
-        tk.Label(filter_frame, text="Search ID:").grid(row=0, column=0, padx=5)
-        self.search_entry = tk.Entry(filter_frame, width=15)
-        self.search_entry.grid(row=0, column=1, padx=5)
+        tk.Label(filter_frame, text="Search ID:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, padx=5)
+        self.search_entry = tk.Entry(filter_frame, width=15, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.search_entry.grid(row=0, column=1, padx=5, ipady=2)
 
-        search_btn = tk.Button(filter_frame, text="Search", command=self.search_orders, width=8)
+        search_btn = tk.Button(filter_frame, text="Search", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.search_orders, width=8)
         search_btn.grid(row=0, column=2, padx=(5,15))
 
-        tk.Label(filter_frame, text="Date From:").grid(row=0, column=3, padx=(8,5))
-        self.date_from = tk.Entry(filter_frame, width=12)
+        tk.Label(filter_frame, text="Date From:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=3, padx=(8,5))
+        self.date_from = tk.Entry(filter_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY, width=12)
         self.date_from.insert(0, "mm/dd/yyyy")
-        self.date_from.grid(row=0, column=4, padx=(5,10))
+        self.date_from.grid(row=0, column=4, padx=(5,10), ipady=2)
 
-        tk.Label(filter_frame, text="To:").grid(row=0, column=5, padx=5)
-        self.date_to = tk.Entry(filter_frame, width=12)
+        tk.Label(filter_frame, text="To:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=5, padx=5)
+        self.date_to = tk.Entry(filter_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY, width=12)
         self.date_to.insert(0, "mm/dd/yyyy")
-        self.date_to.grid(row=0, column=6, padx=(5,12))
+        self.date_to.grid(row=0, column=6, padx=(5,12), ipady=2)
 
         # improve date entry UX: clear placeholder on focus, restore if empty
         def _clear_placeholder(event):
@@ -720,17 +757,17 @@ class ViewOrderPage(tk.Frame):
             self.date_from.insert(0, 'mm/dd/yyyy'); self.date_to.insert(0, 'mm/dd/yyyy')
 
         # Quick-fill buttons inline on same row (buttons assigned to variables for responsive behavior)
-        date_btn_frame = tk.Frame(filter_frame)
+        date_btn_frame = tk.Frame(filter_frame, bg=PRIMARY)
         date_btn_frame.grid(row=0, column=7, padx=(2,0))
-        btn_today = tk.Button(date_btn_frame, text='Today', width=8, command=_fill_today)
+        btn_today = tk.Button(date_btn_frame, text='Today', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, width=8, command=_fill_today)
         btn_today.pack(side='left', padx=2)
-        btn_week = tk.Button(date_btn_frame, text='This Week', width=10, command=_fill_week)
+        btn_week = tk.Button(date_btn_frame, text='This Week', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, width=10, command=_fill_week)
         btn_week.pack(side='left', padx=2)
-        btn_month = tk.Button(date_btn_frame, text='This Month', width=10, command=_fill_month)
+        btn_month = tk.Button(date_btn_frame, text='This Month', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, width=10, command=_fill_month)
         btn_month.pack(side='left', padx=2)
-        btn_clear = tk.Button(date_btn_frame, text='Clear', width=6, command=_clear_dates)
+        btn_clear = tk.Button(date_btn_frame, text='Clear', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, width=6, command=_clear_dates)
         btn_clear.pack(side='left', padx=2)
-        search_btn_inline = tk.Button(date_btn_frame, text='Search by Date', width=12, command=self.search_by_date)
+        search_btn_inline = tk.Button(date_btn_frame, text='Search by Date', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, width=12, command=self.search_by_date)
         search_btn_inline.pack(side='left', padx=4)
         # make space to right so layout doesn't look cramped — keep buttons near date fields
         filter_frame.columnconfigure(7, weight=0)
@@ -806,14 +843,14 @@ class ViewOrderPage(tk.Frame):
                 pass
 
         # Legend/Filter at bottom (moved below the notebook)
-        legend_frame = tk.Frame(main_frame)
+        legend_frame = tk.Frame(main_frame, bg=PRIMARY)
         legend_frame.grid(row=4, column=0, sticky="ew", padx=15, pady=10)
 
-        legend_label = tk.Label(legend_frame, text="Filter By Status:")
+        legend_label = tk.Label(legend_frame, text="Filter By Status:", font=TTL_TEXT, bg=PRIMARY)
         legend_label.pack(side="left", padx=5)
-
+        
         for status in ["All", "Received", "In-Progress", "Ready", "Released"]:
-            tk.Button(legend_frame, text=status, width=12, command=lambda s=status: self.sort_by_status(s)).pack(side="left", padx=3)
+            tk.Button(legend_frame, text=status, font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, width=12, command=lambda s=status: self.sort_by_status(s)).pack(side="left", padx=3)
 
         # Load initial data
         self.refresh_all()

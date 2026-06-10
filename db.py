@@ -932,3 +932,15 @@ def get_top_services_report_data():
     counts = [row[1] for row in raw_data]
     
     return services, counts
+
+def get_next_customer_id():
+    """Fetches the highest CustomerID from the database and adds 1."""
+    conn = sqlite3.connect("Laundrify.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT MAX(CustomerID) FROM CUSTOMERS")
+    result = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return (result + 1) if result is not None else 1
