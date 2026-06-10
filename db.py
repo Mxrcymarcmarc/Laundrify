@@ -67,12 +67,144 @@ def init_db():
         except Exception:
             # column likely exists
             pass
+        # Ensure ORDER_DETAILS has Service_Name column to persist service display even if SERVICES changes
+        try:
+            cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Service_Name TEXT DEFAULT ''")
+        except Exception:
+            pass
         # Ensure SERVICES has Service_Unit column (kg or pcs)
         try:
             cursor.execute("ALTER TABLE SERVICES ADD COLUMN Service_Unit TEXT DEFAULT 'pcs'")
         except Exception:
             pass
+        # Ensure SERVICES has Combo_Key for composite/mixed services
+        try:
+            cursor.execute("ALTER TABLE SERVICES ADD COLUMN Combo_Key TEXT DEFAULT NULL")
+        except Exception:
+            pass
+        # Ensure ORDERS has Composite_ServiceID to point to a combined service record when order contains multiple services
+        try:
+            cursor.execute("ALTER TABLE ORDERS ADD COLUMN Composite_ServiceID INTEGER NULL")
+        except Exception:
+            pass
         conn.commit()
+
+    # Backfill Service_Name for existing order details so older orders show service labels
+    try:
+        with sqlite3.connect("Laundrify.db") as cconn:
+            cc = cconn.cursor()
+            # Update from SERVICES table where possible
+            cc.execute("SELECT DISTINCT ServiceID FROM ORDER_DETAILS WHERE IFNULL(Service_Name,'') = ''")
+            sids = [r[0] for r in cc.fetchall()]
+            for sid in sids:
+                cc.execute("SELECT Service_Type FROM SERVICES WHERE ServiceID = ?", (sid,))
+                row = cc.fetchone()
+                if row and row[0]:
+                    cc.execute("UPDATE ORDER_DETAILS SET Service_Name = ? WHERE ServiceID = ? AND IFNULL(Service_Name,'') = ''", (row[0], sid))
+            cconn.commit()
+            # For remaining rows without Service_Name, attempt heuristic match by unit and per-item price
+            cc.execute("SELECT OrderDetailID, OrderID, Order_Subtotal, Item_Weight, IFNULL(Item_Unit,'pcs') FROM ORDER_DETAILS WHERE IFNULL(Service_Name,'') = ''")
+            remaining = cc.fetchall()
+            if remaining:
+                # load service candidates
+                cc.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, IFNULL(Service_Unit,'pcs') FROM SERVICES")
+                services = cc.fetchall()
+                import re
+                for odid, oid, subtotal, iweight, iunit in remaining:
+                    try:
+                        qty = 0.0
+                        # parse numeric quantity from iweight robustly (handles '12x Large', '3 kg', '3 pcs')
+                        if isinstance(iweight, (int, float)):
+                            qty = float(iweight)
+                        else:
+                            s = (str(iweight) or '').strip().lower()
+                            m = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
+                            if m:
+                                try:
+                                    qty = float(m.group(1))
+                                except Exception:
+                                    qty = 0.0
+                            else:
+                                qty = 0.0
+                        if qty <= 0:
+                            qty = 1.0
+                        per_unit = None
+                        if subtotal is not None:
+                            try:
+                                per_unit = float(subtotal) / qty if qty else float(subtotal)
+                            except Exception:
+                                per_unit = None
+                        best = None
+                        best_diff = None
+                        for sid2, stype, sprice, sunit in services:
+                            if (sunit or 'pcs').lower() != (iunit or 'pcs').lower():
+                                continue
+                            if per_unit is None:
+                                continue
+                            diff = abs((sprice or 0) - (per_unit or 0))
+                            if best is None or diff < best_diff:
+                                best = stype
+                                best_diff = diff
+                        if best is not None and best_diff is not None and best_diff <= 1.0:
+                            cc.execute("UPDATE ORDER_DETAILS SET Service_Name = ? WHERE OrderDetailID = ?", (best, odid))
+                    except Exception:
+                        continue
+                cconn.commit()
+                # Additional mapping: for ServiceIDs that no longer exist, compute avg per-unit across their rows and pick closest service
+                try:
+                    cc.execute("SELECT DISTINCT ServiceID FROM ORDER_DETAILS WHERE IFNULL(Service_Name,'') = ''")
+                    missing_sids = [r[0] for r in cc.fetchall()]
+                    if missing_sids:
+                        cc.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, IFNULL(Service_Unit,'pcs') FROM SERVICES")
+                        services_all = cc.fetchall()
+                        import re
+                        for msid in missing_sids:
+                            try:
+                                cc.execute("SELECT Order_Subtotal, Item_Weight, IFNULL(Item_Unit,'pcs') FROM ORDER_DETAILS WHERE ServiceID = ?", (msid,))
+                                rows_m = cc.fetchall()
+                                vals = []
+                                unit_guess = None
+                                for subtotal, iweight, iunit in rows_m:
+                                    unit_guess = (iunit or 'pcs')
+                                    qty = 0.0
+                                    if isinstance(iweight, (int, float)):
+                                        qty = float(iweight)
+                                    else:
+                                        s = (str(iweight) or '').strip().lower()
+                                        m = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
+                                        if m:
+                                            try:
+                                                qty = float(m.group(1))
+                                            except Exception:
+                                                qty = 0.0
+                                        else:
+                                            qty = 0.0
+                                    if qty <= 0:
+                                        qty = 1.0
+                                    try:
+                                        if subtotal is not None:
+                                            vals.append(float(subtotal)/qty)
+                                    except Exception:
+                                        continue
+                                if not vals:
+                                    continue
+                                avg = sum(vals)/len(vals)
+                                best=None; best_diff=None
+                                for sid2, stype, sprice, sunit in services_all:
+                                    if (sunit or 'pcs').lower() != (unit_guess or 'pcs').lower():
+                                        continue
+                                    diff = abs((sprice or 0) - avg)
+                                    if best is None or diff < best_diff:
+                                        best = stype; best_diff=diff
+                                if best is not None:
+                                    cc.execute("UPDATE ORDER_DETAILS SET Service_Name=? WHERE ServiceID = ? AND IFNULL(Service_Name,'') = ''", (best, msid))
+                            except Exception:
+                                continue
+                        cconn.commit()
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 def get_orders():
     """Fetch all orders with their details"""
@@ -127,24 +259,78 @@ def is_order_paid(order_id):
         return result and result[0] is not None
 
 def get_order_services(order_id):
-    """Get unique service names for an order
-    
-    Returns:
-        str: Service name if single service, "Mixed Services" if multiple
+    """Get unique service names for an order.
+
+    Prefer the persisted Service_Name in ORDER_DETAILS (added for robustness). If not present,
+    try multiple fallbacks:
+      1. JOIN SERVICES by ServiceID
+      2. Heuristic match by unit and per-item price
+    Returns a single service name, "Mixed Services", or "Unknown".
     """
+    import math
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT DISTINCT s.Service_Type
-            FROM ORDER_DETAILS od
-            JOIN SERVICES s ON od.ServiceID = s.ServiceID
-            WHERE od.OrderID = ?
-        """, (order_id,))
-        services = cursor.fetchall()
-        
-        if len(services) == 1:
-            return services[0][0]
-        elif len(services) > 1:
+        # read order detail rows for this order
+        cursor.execute("SELECT ServiceID, IFNULL(Service_Name,''), Order_Subtotal, Item_Weight, IFNULL(Item_Unit,'pcs') FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
+        rows = cursor.fetchall()
+
+        persisted_names = []
+        inferred_names = []
+
+        for sid, sname, subtotal, item_weight, item_unit in rows:
+            if sname and str(sname).strip():
+                persisted_names.append(str(sname).strip())
+                continue
+            # try direct lookup by ServiceID
+            cursor.execute("SELECT Service_Type FROM SERVICES WHERE ServiceID = ?", (sid,))
+            r = cursor.fetchone()
+            if r and r[0]:
+                inferred_names.append(r[0])
+                continue
+            # heuristic: try to infer by unit and price-per-unit
+            try:
+                qty = 0.0
+                if isinstance(item_weight, (int, float)):
+                    qty = float(item_weight)
+                else:
+                    try:
+                        qty = float(str(item_weight))
+                    except Exception:
+                        qty = 0.0
+                if qty <= 0:
+                    qty = 1.0
+                price_per_unit = float(subtotal) / qty if subtotal is not None else None
+                if price_per_unit is not None:
+                    # look for exact price match first
+                    cursor.execute("SELECT Service_Type FROM SERVICES WHERE Service_Unit = ? AND Service_Unit_Price = ?", (item_unit or 'pcs', int(round(price_per_unit))))
+                    rr = cursor.fetchone()
+                    if rr and rr[0]:
+                        inferred_names.append(rr[0])
+                        continue
+                    # try approximate match within 1 peso
+                    cursor.execute("SELECT Service_Type, Service_Unit_Price FROM SERVICES WHERE Service_Unit = ?", (item_unit or 'pcs',))
+                    candidates = cursor.fetchall()
+                    best = None
+                    best_diff = None
+                    for c in candidates:
+                        c_name, c_price = c[0], c[1]
+                        diff = abs((c_price or 0) - (price_per_unit or 0))
+                        if best is None or diff < best_diff:
+                            best = c_name
+                            best_diff = diff
+                    if best is not None and best_diff is not None and best_diff <= 1.0:
+                        inferred_names.append(best)
+            except Exception:
+                pass
+
+        combined = []
+        for n in persisted_names + inferred_names:
+            if n and n not in combined:
+                combined.append(n)
+
+        if len(combined) == 1:
+            return combined[0]
+        elif len(combined) > 1:
             return "Mixed Services"
         else:
             return "Unknown"
@@ -241,7 +427,11 @@ def update_service(service_id, service_type, unit_price, unit='pcs'):
         return True
 
 def restore_default_services():
-    """Restore a curated default set of services and prices"""
+    """Restore a curated default set of services and prices.
+
+    This function performs an upsert for defaults: if a service with the same Service_Type
+    exists it will be updated (preserving ServiceID); otherwise the service will be inserted.
+    """
     defaults = [
         ("Wash, Dry & Fold", 70, 'kg'),
         ("Wash & Dry", 50, 'kg'),
@@ -250,10 +440,46 @@ def restore_default_services():
     ]
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM SERVICES")
-        cursor.executemany("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit) VALUES (?, ?, ?)", defaults)
+        for name, price, unit in defaults:
+            cursor.execute("SELECT ServiceID FROM SERVICES WHERE Service_Type = ?", (name,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                cursor.execute("UPDATE SERVICES SET Service_Unit_Price = ?, Service_Unit = ? WHERE ServiceID = ?", (int(price), unit, row[0]))
+            else:
+                cursor.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit) VALUES (?, ?, ?)", (name, int(price), unit))
         conn.commit()
-        return True
+    return True
+
+
+def get_or_create_combined_service(component_service_ids):
+    """Return a deterministic combined ServiceID for the given component service IDs.
+
+    The combination key is formed by sorting numeric ServiceIDs and joining them with '-'.
+    If a SERVICES row with that Combo_Key exists its ServiceID is returned. Otherwise a new
+    SERVICES row is inserted with Service_Type set to the joined service names and Combo_Key set.
+    """
+    ids = sorted({int(i) for i in component_service_ids if i is not None})
+    if not ids:
+        return None
+    if len(ids) == 1:
+        return ids[0]
+    combo_key = 'combo:' + '-'.join(str(i) for i in ids)
+    with sqlite3.connect("Laundrify.db") as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT ServiceID FROM SERVICES WHERE Combo_Key = ?", (combo_key,))
+        row = cur.fetchone()
+        if row and row[0]:
+            return row[0]
+        # build a human-friendly name using the component service types (in the sorted id order)
+        placeholders = ','.join(['?'] * len(ids))
+        cur.execute(f"SELECT ServiceID, Service_Type FROM SERVICES WHERE ServiceID IN ({placeholders})", tuple(ids))
+        rows = cur.fetchall()
+        id_to_name = {r[0]: r[1] for r in rows}
+        names = [id_to_name.get(i, f"SVC#{i}") for i in ids]
+        combo_name = ' + '.join(names)
+        cur.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit, Combo_Key) VALUES (?, ?, ?, ?)", (combo_name, 0, 'mixed', combo_key))
+        conn.commit()
+        return cur.lastrowid
 
 
 def update_order_status(order_id, new_status):
@@ -435,9 +661,9 @@ def create_order(customer_id, total_price, items, notes=""):
                             unit = 'pcs'
 
             cursor.execute(
-                """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit) 
-                   VALUES (?, ?, ?, ?, ?)""",
-                (order_id, service_id, item['subtotal'], qty_value, unit)
+                """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name) 
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''))
             )
         
         conn.commit()

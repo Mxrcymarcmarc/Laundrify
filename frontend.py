@@ -141,26 +141,30 @@ class NewOrderPage(tk.Frame):
         for i in range(10):
             left.rowconfigure(i, pad=6)
 
-        tk.Label(left, text="Name:").grid(row=0, column=0, sticky="w")
-        self.name_entry = tk.Entry(left)
-        self.name_entry.grid(row=0, column=1, sticky="ew")
+        tk.Label(left, text="First Name:").grid(row=0, column=0, sticky="w")
+        self.first_name_entry = tk.Entry(left)
+        self.first_name_entry.grid(row=0, column=1, sticky="ew")
 
-        tk.Label(left, text="Address:").grid(row=1, column=0, sticky="w")
+        tk.Label(left, text="Last Name:").grid(row=1, column=0, sticky="w")
+        self.last_name_entry = tk.Entry(left)
+        self.last_name_entry.grid(row=1, column=1, sticky="ew")
+
+        tk.Label(left, text="Address:").grid(row=2, column=0, sticky="w")
         self.address_entry = tk.Entry(left)
-        self.address_entry.grid(row=1, column=1, sticky="ew")
+        self.address_entry.grid(row=2, column=1, sticky="ew")
 
-        tk.Label(left, text="Email:").grid(row=2, column=0, sticky="w")
+        tk.Label(left, text="Email:").grid(row=3, column=0, sticky="w")
         self.email_entry = tk.Entry(left)
-        self.email_entry.grid(row=2, column=1, sticky="ew")
+        self.email_entry.grid(row=3, column=1, sticky="ew")
 
-        tk.Label(left, text="Phone:").grid(row=3, column=0, sticky="w")
+        tk.Label(left, text="Phone:").grid(row=4, column=0, sticky="w")
         self.phone_entry = tk.Entry(left)
-        self.phone_entry.grid(row=3, column=1, sticky="ew")
+        self.phone_entry.grid(row=4, column=1, sticky="ew")
         # Register phone validation - only numbers
         vcmd_phone = left.register(self.validate_phone)
         self.phone_entry.config(validate='key', validatecommand=(vcmd_phone, '%P'))
 
-        tk.Label(left, text="Service:").grid(row=4, column=0, sticky="w")
+        tk.Label(left, text="Service:").grid(row=5, column=0, sticky="w")
         # default in-code service map (used for UI behavior). Prices will be updated from DB if available.
         self.service_map = {
             "Wash, Dry & Fold": ("weight", 70),
@@ -172,12 +176,12 @@ class NewOrderPage(tk.Frame):
         reload_services_for_page(self)
 
         self.service_combo = ttk.Combobox(left, values=list(self.service_map.keys()), state="readonly")
-        self.service_combo.grid(row=4, column=1, sticky="ew")
+        self.service_combo.grid(row=5, column=1, sticky="ew")
         self.service_combo.bind("<<ComboboxSelected>>", self.on_service_selected)
 
         # Dynamic field frame (weight or size selection)
         self.dynamic_frame = tk.Frame(left)
-        self.dynamic_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=6)
+        self.dynamic_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=6)
         self.dynamic_frame.columnconfigure(0, minsize=80)
         self.dynamic_frame.columnconfigure(1, weight=1)
         # unit price display (updated on service selection)
@@ -185,12 +189,12 @@ class NewOrderPage(tk.Frame):
         unit_price_label = tk.Label(self.dynamic_frame, textvariable=self.unit_price_var, fg='#2c3e50')
         unit_price_label.grid(row=2, column=0, columnspan=2, sticky='w')
 
-        tk.Label(left, text="Additional\nNotes:").grid(row=6, column=0, sticky="nw")
+        tk.Label(left, text="Additional\nNotes:").grid(row=7, column=0, sticky="nw")
         self.notes_text = tk.Text(left, height=3, width=30)
-        self.notes_text.grid(row=6, column=1, sticky="ew")
+        self.notes_text.grid(row=7, column=1, sticky="ew")
 
         add_btn = tk.Button(left, text="Add Item", command=self.add_item)
-        add_btn.grid(row=7, column=0, columnspan=2, pady=10)
+        add_btn.grid(row=8, column=0, columnspan=2, pady=10)
 
         # right - instructions and order items area
         # header with Instruction label and gear button on same row
@@ -495,18 +499,38 @@ class NewOrderPage(tk.Frame):
                 return
 
         self.order_tree.insert("", "end", values=(service, quantity, f"₱ {price:.2f}"))
+        # lock customer fields once first item is added
+        try:
+            self.first_name_entry.config(state='disabled')
+            self.last_name_entry.config(state='disabled')
+            self.address_entry.config(state='disabled')
+            self.email_entry.config(state='disabled')
+            self.phone_entry.config(state='disabled')
+        except Exception:
+            pass
 
     def remove_item(self):
         sel = self.order_tree.selection()
         for iid in sel:
             self.order_tree.delete(iid)
+        # if no more items, unlock customer fields
+        if not self.order_tree.get_children():
+            try:
+                self.first_name_entry.config(state='normal')
+                self.last_name_entry.config(state='normal')
+                self.address_entry.config(state='normal')
+                self.email_entry.config(state='normal')
+                self.phone_entry.config(state='normal')
+            except Exception:
+                pass
 
     def create_order(self):
         from tkinter import messagebox
         import db
         
         # Validate customer info
-        name = self.name_entry.get().strip()
+        first_name = self.first_name_entry.get().strip()
+        last_name = self.last_name_entry.get().strip()
         phone = self.phone_entry.get().strip()
         address = self.address_entry.get().strip()
         email = self.email_entry.get().strip()
@@ -514,8 +538,8 @@ class NewOrderPage(tk.Frame):
         
         # Required field validation
         required_errors = []
-        if not name:
-            required_errors.append("Name is required")
+        if not first_name:
+            required_errors.append("First name is required")
         if not phone:
             required_errors.append("Phone is required")
         if not address:
@@ -537,13 +561,11 @@ class NewOrderPage(tk.Frame):
             return
         
         try:
-            # Parse name into first and last name
-            name_parts = name.split(maxsplit=1)
-            first_name = name_parts[0]
-            last_name = name_parts[1] if len(name_parts) > 1 else ""
-            
+            # Use first and last name entries directly
+            first = first_name
+            last = last_name
             # Create or get customer
-            customer_id = db.create_or_get_customer(first_name, last_name, phone, email, address)
+            customer_id = db.create_or_get_customer(first, last, phone, email, address)
             
             # Calculate total and prepare items
             total_price = 0
@@ -568,8 +590,17 @@ class NewOrderPage(tk.Frame):
             
             messagebox.showinfo("Success", f"Order created successfully!\nOrder ID: {order_id}\nTotal: ₱{total_price:.2f}")
             
-            # Clear the form
-            self.name_entry.delete(0, tk.END)
+            # Clear the form and unlock customer fields
+            try:
+                self.first_name_entry.config(state='normal')
+                self.last_name_entry.config(state='normal')
+                self.address_entry.config(state='normal')
+                self.email_entry.config(state='normal')
+                self.phone_entry.config(state='normal')
+            except Exception:
+                pass
+            self.first_name_entry.delete(0, tk.END)
+            self.last_name_entry.delete(0, tk.END)
             self.address_entry.delete(0, tk.END)
             self.email_entry.delete(0, tk.END)
             self.phone_entry.delete(0, tk.END)
@@ -1419,42 +1450,42 @@ class ViewOrderPage(tk.Frame):
         form.pack(fill='both', expand=True)
         form.columnconfigure(1, weight=1)
 
-        # Full Name field (single input)
-        tk.Label(form, text="Full Name:").grid(row=0, column=0, sticky='w')
-        full_name = tk.Entry(form)
-        full_name.grid(row=0, column=1, sticky='ew')
-        full_name.insert(0, f"{order.get('First_Name','')} {order.get('Last_Name','')}".strip())
+        # First and Last Name fields
+        tk.Label(form, text="First Name:").grid(row=0, column=0, sticky='w')
+        first_name = tk.Entry(form)
+        first_name.grid(row=0, column=1, sticky='ew')
+        first_name.insert(0, order.get('First_Name',''))
 
-        tk.Label(form, text="Email:").grid(row=1, column=0, sticky='w')
+        tk.Label(form, text="Last Name:").grid(row=1, column=0, sticky='w')
+        last_name = tk.Entry(form)
+        last_name.grid(row=1, column=1, sticky='ew')
+        last_name.insert(0, order.get('Last_Name',''))
+
+        tk.Label(form, text="Email:").grid(row=2, column=0, sticky='w')
         email = tk.Entry(form)
-        email.grid(row=1, column=1, sticky='ew')
+        email.grid(row=2, column=1, sticky='ew')
         email.insert(0, order.get('Email',''))
 
-        tk.Label(form, text="Phone:").grid(row=2, column=0, sticky='w')
+        tk.Label(form, text="Phone:").grid(row=3, column=0, sticky='w')
         ph = tk.Entry(form)
-        ph.grid(row=2, column=1, sticky='ew')
+        ph.grid(row=3, column=1, sticky='ew')
         ph.insert(0, order.get('Phone_Number',''))
 
-        tk.Label(form, text="Status:").grid(row=3, column=0, sticky='w')
+        tk.Label(form, text="Status:").grid(row=4, column=0, sticky='w')
         status = ttk.Combobox(form, values=["Received","In-Progress","Ready","Released"], state='readonly')
-        status.grid(row=3, column=1, sticky='ew')
+        status.grid(row=4, column=1, sticky='ew')
         status.set(order['Order_Status'])
 
-        tk.Label(form, text="Notes:").grid(row=4, column=0, sticky='nw')
+        tk.Label(form, text="Notes:").grid(row=5, column=0, sticky='nw')
         notes = tk.Text(form, height=6)
-        notes.grid(row=4, column=1, sticky='ew')
+        notes.grid(row=5, column=1, sticky='ew')
         notes.insert('1.0', order.get('Order_Notes') or '')
 
         def save_changes():
             try:
-                # split full name into first and last
-                name = full_name.get().strip()
-                if name:
-                    parts = name.split(None, 1)
-                    first = parts[0]
-                    last = parts[1] if len(parts) > 1 else ''
-                else:
-                    first, last = '', ''
+                # read first and last name fields
+                first = first_name.get().strip()
+                last = last_name.get().strip()
                 # update customer (CustomerID, First, Last, Phone, Email, Address)
                 db.update_customer(order['CustomerID'], first, last, ph.get().strip(), email.get().strip(), '')
                 # update order
@@ -1466,7 +1497,7 @@ class ViewOrderPage(tk.Frame):
                 messagebox.showerror('Error', str(e))
 
         btn_frame = tk.Frame(form, bg='white')
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=12, sticky='ew')
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=12, sticky='ew')
         btn_frame.columnconfigure((0,1), weight=1)
         tk.Button(btn_frame, text='Confirm', command=save_changes, font=("Arial", 11, "bold"), bg="#3498db", fg="white", height=2, cursor="hand2").grid(row=0, column=0, sticky='ew', padx=5)
         tk.Button(btn_frame, text='Cancel', command=edit_win.destroy, font=("Arial", 11), bg="#95a5a6", fg="white", height=2, cursor="hand2").grid(row=0, column=1, sticky='ew', padx=5)
