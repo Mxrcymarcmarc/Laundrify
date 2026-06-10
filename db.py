@@ -16,7 +16,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS SERVICES (
             ServiceID INTEGER PRIMARY KEY AUTOINCREMENT,
             Service_Type TEXT NOT NULL,
-            Service_Unit_Price INTEGER NOT NULL
+            Service_Unit_Price INTEGER NOT NULL,
+            Service_Unit TEXT NOT NULL DEFAULT 'pcs'
         )
         """,
         """
@@ -39,7 +40,8 @@ def init_db():
             OrderID INTEGER NOT NULL,
             ServiceID INTEGER NOT NULL,
             Order_Subtotal INTEGER NOT NULL,
-            Item_Weight INTEGER NOT NULL,
+            Item_Weight REAL NOT NULL,
+            Item_Unit TEXT NOT NULL DEFAULT 'pcs',
             FOREIGN KEY (OrderID) REFERENCES ORDERS(OrderID),
             FOREIGN KEY (ServiceID) REFERENCES SERVICES(ServiceID)
         )
@@ -59,6 +61,17 @@ def init_db():
         cursor = conn.cursor()
         for table_query in tables:
             cursor.execute(table_query)
+        # Ensure ORDER_DETAILS has Item_Unit column (backfill if missing)
+        try:
+            cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Item_Unit TEXT DEFAULT 'pcs'")
+        except Exception:
+            # column likely exists
+            pass
+        # Ensure SERVICES has Service_Unit column (kg or pcs)
+        try:
+            cursor.execute("ALTER TABLE SERVICES ADD COLUMN Service_Unit TEXT DEFAULT 'pcs'")
+        except Exception:
+            pass
         conn.commit()
 
 def get_orders():
@@ -98,7 +111,7 @@ def get_order_details(order_id):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT o.*, c.First_Name, c.Last_Name, c.Phone_Number
+            SELECT o.*, c.First_Name, c.Last_Name, c.Phone_Number, c.Email
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
             WHERE o.OrderID = ?
@@ -135,6 +148,112 @@ def get_order_services(order_id):
             return "Mixed Services"
         else:
             return "Unknown"
+
+def get_order_qty_display(order_id):
+    """Return a human-readable qty/wt summary for an order, e.g. '3 kg' or '2 pcs' or '3 kg + 2 pcs'
+    Robustly parses legacy and current ORDER_DETAILS entries where Item_Weight may contain textual quantities.
+    """
+    import re
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT Item_Weight, IFNULL(Item_Unit, '') FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
+        rows = cursor.fetchall()
+        if not rows:
+            return "-"
+        totals = {}
+        for r in rows:
+            raw_weight = r[0]
+            unit_hint = (r[1] or '').lower()
+            weight = 0.0
+            unit = 'pcs'
+
+            # If explicit unit column exists and is meaningful
+            if unit_hint in ('kg', 'pcs', 'pc'):
+                unit = 'kg' if unit_hint == 'kg' else 'pcs'
+
+            # Try numeric coercion first
+            if isinstance(raw_weight, (int, float)):
+                weight = float(raw_weight)
+            else:
+                # raw_weight might be bytes or str with units: '3 kg', '3x Small', '3 pcs'
+                try:
+                    s = str(raw_weight).strip().lower()
+                except Exception:
+                    s = ''
+
+                if not s:
+                    weight = 0.0
+                else:
+                    # match '3 kg' or '3.5 kg'
+                    m = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*(kg|kilos)?$", s)
+                    if m:
+                        weight = float(m.group(1))
+                        unit = 'kg'
+                    else:
+                        # match '3x small' or '3 x small' or '3 pcs' or '3pc'
+                        m2 = re.match(r"^([0-9]+)\s*(?:x|pcs|pc)?(?:\s*.*)?$", s)
+                        if m2:
+                            weight = float(m2.group(1))
+                            unit = 'pcs'
+                        else:
+                            # extract first numeric token as fallback
+                            m3 = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
+                            if m3:
+                                if '.' in m3.group(1):
+                                    weight = float(m3.group(1))
+                                    unit = 'kg'
+                                else:
+                                    weight = float(m3.group(1))
+                                    unit = 'pcs'
+                            else:
+                                weight = 0.0
+                                unit = 'pcs'
+
+            totals[unit] = totals.get(unit, 0.0) + weight
+
+        parts = []
+        for unit, val in totals.items():
+            if unit == 'kg':
+                parts.append(f"{val:g} kg")
+            else:
+                parts.append(f"{int(val)} pcs")
+        return ' + '.join(parts)
+
+def get_services():
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, IFNULL(Service_Unit,'pcs') as Service_Unit FROM SERVICES ORDER BY Service_Type")
+        return cursor.fetchall()
+
+def add_service(service_type, unit_price, unit='pcs'):
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit) VALUES (?, ?, ?)", (service_type, int(unit_price), unit))
+        conn.commit()
+        return cursor.lastrowid
+
+def update_service(service_id, service_type, unit_price, unit='pcs'):
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE SERVICES SET Service_Type = ?, Service_Unit_Price = ?, Service_Unit = ? WHERE ServiceID = ?", (service_type, int(unit_price), unit, service_id))
+        conn.commit()
+        return True
+
+def restore_default_services():
+    """Restore a curated default set of services and prices"""
+    defaults = [
+        ("Wash, Dry & Fold", 70, 'kg'),
+        ("Wash & Dry", 50, 'kg'),
+        ("Dry Cleaning", 150, 'pcs'),
+        ("Ironing", 20, 'pcs')
+    ]
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM SERVICES")
+        cursor.executemany("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit) VALUES (?, ?, ?)", defaults)
+        conn.commit()
+        return True
 
 
 def update_order_status(order_id, new_status):
@@ -226,19 +345,24 @@ def process_payment(order_id, amount_paid):
         }
 
 def create_or_get_customer(first_name, last_name, phone_number, email="", address=""):
-    """Create a new customer or get existing customer by phone number"""
+    """Create a new customer or get existing customer by phone number.
+
+    If phone_number is empty, always create a new customer (avoid treating empty phone as unique key).
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT CustomerID FROM CUSTOMERS WHERE Phone_Number = ?", (phone_number,))
-        result = cursor.fetchone()
-        
-        if result:
-            return result[0]
-        
+
+        phone = (phone_number or "").strip()
+        if phone:
+            cursor.execute("SELECT CustomerID FROM CUSTOMERS WHERE Phone_Number = ?", (phone,))
+            result = cursor.fetchone()
+            if result:
+                return result[0]
+
+        # fallback: create a new customer record
         cursor.execute(
             "INSERT INTO CUSTOMERS (First_Name, Last_Name, Phone_Number, Email, Address) VALUES (?, ?, ?, ?, ?)",
-            (first_name, last_name, phone_number, email, address)
+            (first_name, last_name, phone, email, address)
         )
         conn.commit()
         return cursor.lastrowid
@@ -250,6 +374,7 @@ def create_order(customer_id, total_price, items, notes=""):
     Returns: order_id
     """
     from datetime import datetime
+    import re
     
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
@@ -276,14 +401,155 @@ def create_order(customer_id, total_price, items, notes=""):
                 )
                 service_id = cursor.lastrowid
             
+            # parse quantity string to numeric value and unit
+            qty_raw = item.get('quantity', '')
+            qty_value = 0
+            unit = 'pcs'
+            if isinstance(qty_raw, (int, float)):
+                qty_value = qty_raw
+            elif isinstance(qty_raw, str):
+                s = qty_raw.strip().lower()
+                # match patterns like '3 kg' or '3.5 kg'
+                m = re.match(r"([0-9]+(?:\.[0-9]+)?)\s*kg", s)
+                if m:
+                    qty_value = float(m.group(1))
+                    unit = 'kg'
+                else:
+                    # match patterns like '3x' or '3 x' or '3 pcs'
+                    m2 = re.match(r"([0-9]+)\s*(?:x|pcs|pc)?", s)
+                    if m2:
+                        qty_value = int(m2.group(1))
+                        unit = 'pcs'
+                    else:
+                        # fallback: try to extract number
+                        m3 = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
+                        if m3:
+                            if '.' in m3.group(1):
+                                qty_value = float(m3.group(1))
+                                unit = 'kg'
+                            else:
+                                qty_value = int(m3.group(1))
+                                unit = 'pcs'
+                        else:
+                            qty_value = 0
+                            unit = 'pcs'
+
             cursor.execute(
-                """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight) 
-                   VALUES (?, ?, ?, ?)""",
-                (order_id, service_id, item['subtotal'], item.get('quantity', 0))
+                """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit) 
+                   VALUES (?, ?, ?, ?, ?)""",
+                (order_id, service_id, item['subtotal'], qty_value, unit)
             )
         
         conn.commit()
         return order_id
+
+
+def get_paid_orders():
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   c.First_Name, c.Last_Name
+            FROM ORDERS o
+            JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
+            WHERE o.Order_Payed_At IS NOT NULL AND o.Order_Released_At IS NULL
+            ORDER BY o.Order_Received_At DESC
+        """)
+        return cursor.fetchall()
+
+
+def get_archived_orders():
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   c.First_Name, c.Last_Name
+            FROM ORDERS o
+            JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
+            WHERE o.Order_Payed_At IS NOT NULL AND o.Order_Released_At IS NOT NULL
+            ORDER BY o.Order_Received_At DESC
+        """)
+        return cursor.fetchall()
+
+# Date-range queries for search-by-date
+def get_unpaid_orders_by_date(start_date, end_date):
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   c.First_Name, c.Last_Name, c.Email
+            FROM ORDERS o
+            JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
+            WHERE o.Order_Payed_At IS NULL
+            AND date(o.Order_Received_At) BETWEEN date(?) AND date(?)
+            ORDER BY o.Order_Received_At DESC
+        """, (start_date, end_date))
+        return cursor.fetchall()
+
+def get_paid_orders_by_date(start_date, end_date):
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   c.First_Name, c.Last_Name, c.Email
+            FROM ORDERS o
+            JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
+            WHERE o.Order_Payed_At IS NOT NULL AND o.Order_Released_At IS NULL
+            AND date(o.Order_Received_At) BETWEEN date(?) AND date(?)
+            ORDER BY o.Order_Received_At DESC
+        """, (start_date, end_date))
+        return cursor.fetchall()
+
+def get_archived_orders_by_date(start_date, end_date):
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   c.First_Name, c.Last_Name, c.Email
+            FROM ORDERS o
+            JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
+            WHERE o.Order_Payed_At IS NOT NULL AND o.Order_Released_At IS NOT NULL
+            AND date(o.Order_Received_At) BETWEEN date(?) AND date(?)
+            ORDER BY o.Order_Received_At DESC
+        """, (start_date, end_date))
+        return cursor.fetchall()
+
+
+def update_customer(customer_id, first_name, last_name, phone_number, email="", address=""):
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE CUSTOMERS SET First_Name = ?, Last_Name = ?, Phone_Number = ?, Email = ?, Address = ? WHERE CustomerID = ?",
+            (first_name, last_name, phone_number, email, address, customer_id)
+        )
+        conn.commit()
+        return True
+
+
+def update_order(order_id, status=None, notes=None):
+    from datetime import datetime
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        if status is not None:
+            cursor.execute("UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?", (status, order_id))
+            if status == 'Ready':
+                cursor.execute("UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ?", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
+            if status == 'Released':
+                cursor.execute("UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ?", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
+        if notes is not None:
+            cursor.execute("UPDATE ORDERS SET Order_Notes = ? WHERE OrderID = ?", (notes, order_id))
+        conn.commit()
+        return True
 
 def get_revenue_report_data():
     day_mapping = {
