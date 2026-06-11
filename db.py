@@ -42,6 +42,9 @@ def init_db():
             Order_Subtotal INTEGER NOT NULL,
             Item_Weight REAL NOT NULL,
             Item_Unit TEXT NOT NULL DEFAULT 'pcs',
+            Service_Name TEXT DEFAULT '',
+            Service_Status TEXT DEFAULT 'Received',
+            Service_Payed_At TEXT DEFAULT NULL,
             FOREIGN KEY (OrderID) REFERENCES ORDERS(OrderID),
             FOREIGN KEY (ServiceID) REFERENCES SERVICES(ServiceID)
         )
@@ -72,6 +75,16 @@ def init_db():
             cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Service_Name TEXT DEFAULT ''")
         except Exception:
             pass
+        # Ensure ORDER_DETAILS has Service_Status column
+        try:
+            cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Service_Status TEXT DEFAULT 'Received'")
+        except Exception:
+            pass
+        # Ensure ORDER_DETAILS has Service_Payed_At column
+        try:
+            cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Service_Payed_At TEXT DEFAULT NULL")
+        except Exception:
+            pass
         # Ensure SERVICES has Service_Unit column (kg or pcs)
         try:
             cursor.execute("ALTER TABLE SERVICES ADD COLUMN Service_Unit TEXT DEFAULT 'pcs'")
@@ -88,6 +101,26 @@ def init_db():
         except Exception:
             pass
         conn.commit()
+
+    # Backfill Service_Status and Service_Payed_At for existing order details from ORDERS table
+    try:
+        with sqlite3.connect("Laundrify.db") as cconn:
+            cc = cconn.cursor()
+            # If Service_Status is 'Received' (default), backfill with parent order's status
+            cc.execute("""
+                UPDATE ORDER_DETAILS
+                SET Service_Status = (SELECT Order_Status FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID)
+                WHERE Service_Status = 'Received' AND EXISTS (SELECT 1 FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID)
+            """)
+            # If Service_Payed_At is NULL, backfill with parent order's payment timestamp
+            cc.execute("""
+                UPDATE ORDER_DETAILS
+                SET Service_Payed_At = (SELECT Order_Payed_At FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID)
+                WHERE Service_Payed_At IS NULL AND EXISTS (SELECT 1 FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID AND ORDERS.Order_Payed_At IS NOT NULL)
+            """)
+            cconn.commit()
+    except Exception:
+        pass
 
     # Backfill Service_Name for existing order details so older orders show service labels
     try:
@@ -502,6 +535,12 @@ def update_order_status(order_id, new_status):
             (new_status, order_id)
         )
         
+        # Cascade to all child services
+        cursor.execute(
+            "UPDATE ORDER_DETAILS SET Service_Status = ? WHERE OrderID = ?",
+            (new_status, order_id)
+        )
+        
         if new_status == "Ready":
             cursor.execute(
                 "UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ?",
@@ -556,6 +595,12 @@ def process_payment(order_id, amount_paid):
         
         cursor.execute(
             "UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?",
+            (timestamp, order_id)
+        )
+        
+        # Cascade payment status to all child services
+        cursor.execute(
+            "UPDATE ORDER_DETAILS SET Service_Payed_At = ? WHERE OrderID = ? AND Service_Payed_At IS NULL",
             (timestamp, order_id)
         )
         
@@ -768,6 +813,8 @@ def update_order(order_id, status=None, notes=None):
         cursor = conn.cursor()
         if status is not None:
             cursor.execute("UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?", (status, order_id))
+            # Cascade status to all child services
+            cursor.execute("UPDATE ORDER_DETAILS SET Service_Status = ? WHERE OrderID = ?", (status, order_id))
             if status == 'Ready':
                 cursor.execute("UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ?", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
             if status == 'Released':
@@ -933,6 +980,203 @@ def get_top_services_report_data():
     
     return services, counts
 
+def get_order_service_rows(order_id):
+    """Return a list of service-line dicts for the given order.
+
+    Each dict has:
+        service_name  – human-readable service label
+        qty_display   – formatted quantity string (e.g. '3 kg' or '2x Small')
+        subtotal      – numeric subtotal for that line
+        status        – service status ('Received', 'In-Progress', 'Ready', 'Released')
+        paid          – payment status ('Yes' or 'No')
+
+    Used by the Option-A parent-child treeview in ViewOrderPage._insert_order_rows.
+    """
+    import re
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT od.OrderDetailID, od.ServiceID, od.Order_Subtotal,
+                      od.Item_Weight, IFNULL(od.Item_Unit, 'pcs') as Item_Unit,
+                      IFNULL(od.Service_Name, '') as Service_Name,
+                      IFNULL(od.Service_Status, 'Received') as Service_Status,
+                      od.Service_Payed_At
+               FROM ORDER_DETAILS od
+               WHERE od.OrderID = ?
+               ORDER BY od.OrderDetailID""",
+            (order_id,)
+        )
+        rows = cursor.fetchall()
+
+    result = []
+    for row in rows:
+        # Resolve service name
+        sname = (row['Service_Name'] or '').strip()
+        if not sname:
+            try:
+                with sqlite3.connect("Laundrify.db") as c2:
+                    c2r = c2.execute("SELECT Service_Type FROM SERVICES WHERE ServiceID = ?", (row['ServiceID'],))
+                    sr = c2r.fetchone()
+                    if sr:
+                        sname = sr[0]
+            except Exception:
+                pass
+        if not sname:
+            sname = 'Unknown Service'
+
+        # Build qty display
+        raw_weight = row['Item_Weight']
+        item_unit = (row['Item_Unit'] or 'pcs').lower()
+        subtotal = row['Order_Subtotal'] or 0
+
+        if isinstance(raw_weight, (int, float)):
+            qty_val = float(raw_weight)
+            if item_unit == 'kg':
+                qty_display = f"{qty_val:g} kg"
+            else:
+                qty_display = f"{int(qty_val)} pcs"
+        else:
+            s = str(raw_weight or '').strip()
+            # If it already looks like a formatted string (e.g. '3x Small', '2 kg') keep it
+            if re.search(r'[a-zA-Z]', s):
+                qty_display = s or '—'
+            else:
+                m = re.search(r'([0-9]+(?:\.[0-9]+)?)', s)
+                if m:
+                    qty_val = float(m.group(1))
+                    if item_unit == 'kg':
+                        qty_display = f"{qty_val:g} kg"
+                    else:
+                        qty_display = f"{int(qty_val)} pcs"
+                else:
+                    qty_display = s or '—'
+
+        result.append({
+            'service_id': row['ServiceID'],
+            'service_name': sname,
+            'qty_display': qty_display,
+            'subtotal': float(subtotal),
+            'status': row['Service_Status'] or 'Received',
+            'paid': 'Yes' if row['Service_Payed_At'] else 'No',
+        })
+    return result
+
+
+def is_service_paid(order_id, service_id):
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT Service_Payed_At FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+        res = cursor.fetchone()
+        return res and res[0] is not None
+
+
+def update_service_status(order_id, service_id, new_status):
+    from datetime import datetime
+    
+    # Cannot mark service as Released if it has not been paid
+    if new_status == "Released" and not is_service_paid(order_id, service_id):
+        raise ValueError("Cannot mark service as Released. This service must be paid first.")
+
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE ORDER_DETAILS SET Service_Status = ? WHERE OrderID = ? AND ServiceID = ?", (new_status, order_id, service_id))
+        
+        # Recalculate parent order status
+        cursor.execute("SELECT IFNULL(Service_Status, 'Received') FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
+        statuses = [r[0] for r in cursor.fetchall()]
+        
+        if all(s == 'Released' for s in statuses):
+            agg_status = 'Released'
+        elif all(s in ('Ready', 'Released') for s in statuses):
+            agg_status = 'Ready'
+        elif any(s in ('In-Progress', 'Ready', 'Released') for s in statuses):
+            agg_status = 'In-Progress'
+        else:
+            agg_status = 'Received'
+            
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?", (agg_status, order_id))
+        
+        if agg_status == "Ready":
+            cursor.execute("SELECT Order_Ready_At FROM ORDERS WHERE OrderID = ?", (order_id,))
+            o_ready = cursor.fetchone()
+            if not o_ready or not o_ready[0]:
+                cursor.execute("UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ?", (timestamp, order_id))
+                
+        if agg_status == "Released":
+            cursor.execute("SELECT Order_Released_At FROM ORDERS WHERE OrderID = ?", (order_id,))
+            o_released = cursor.fetchone()
+            if not o_released or not o_released[0]:
+                cursor.execute("UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ?", (timestamp, order_id))
+                
+        conn.commit()
+        return True
+
+
+def process_service_payment(order_id, service_id, amount_paid):
+    from datetime import datetime
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT OrderDetailID, Order_Subtotal, IFNULL(Service_Payed_At, '') FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+        row = cursor.fetchone()
+        if not row:
+            return {
+                'success': False,
+                'message': 'Service not found'
+            }
+            
+        odid = row[0]
+        subtotal = row[1]
+        already_paid = row[2] != ''
+        
+        if already_paid:
+            return {
+                'success': False,
+                'message': 'This service has already been paid.'
+            }
+            
+        if amount_paid < subtotal:
+            return {
+                'success': False,
+                'total_amount': subtotal,
+                'paid_amount': amount_paid,
+                'short_amount': subtotal - amount_paid,
+                'message': f'Insufficient payment. Short by ₱{subtotal - amount_paid:.2f}'
+            }
+            
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Update service payment status
+        cursor.execute("UPDATE ORDER_DETAILS SET Service_Payed_At = ? WHERE OrderDetailID = ?", (timestamp, odid))
+        
+        # Record payment in PAYMENTS table
+        cursor.execute(
+            "INSERT INTO PAYMENTS (OrderID, Amount_Paid, Payment_Date) VALUES (?, ?, ?)",
+            (order_id, amount_paid, timestamp)
+        )
+        
+        # Check if all services for this order are paid now:
+        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
+        unpaid_count = cursor.fetchone()[0]
+        
+        if unpaid_count == 0:
+            # Mark parent order as paid
+            cursor.execute("UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?", (timestamp, order_id))
+            
+        conn.commit()
+        
+        change = amount_paid - subtotal
+        return {
+            'success': True,
+            'total_amount': subtotal,
+            'paid_amount': amount_paid,
+            'change': change,
+            'message': 'Payment processed successfully'
+        }
+
+
 def get_next_customer_id():
     """Fetches the highest CustomerID from the database and adds 1."""
     conn = sqlite3.connect("Laundrify.db")
@@ -944,3 +1188,150 @@ def get_next_customer_id():
     conn.close()
     
     return (result + 1) if result is not None else 1
+
+
+def delete_order(order_id):
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM ORDERS WHERE OrderID = ?", (order_id,))
+        cursor.execute("DELETE FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
+        cursor.execute("DELETE FROM PAYMENTS WHERE OrderID = ?", (order_id,))
+        conn.commit()
+        return True
+
+
+def delete_service_row(order_id, service_id):
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+        
+        # Check if any services remain for this order
+        cursor.execute("SELECT COUNT(*), SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
+        count, new_total = cursor.fetchone()
+        
+        if count == 0:
+            # Delete order entirely
+            cursor.execute("DELETE FROM ORDERS WHERE OrderID = ?", (order_id,))
+            cursor.execute("DELETE FROM PAYMENTS WHERE OrderID = ?", (order_id,))
+            conn.commit()
+            return True, True  # success, parent order deleted
+            
+        # Update parent total price
+        cursor.execute("UPDATE ORDERS SET Order_Total_Price = ? WHERE OrderID = ?", (new_total or 0, order_id))
+        
+        # Recalculate status
+        cursor.execute("SELECT IFNULL(Service_Status, 'Received') FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
+        statuses = [r[0] for r in cursor.fetchall()]
+        
+        if all(s == 'Released' for s in statuses):
+            agg_status = 'Released'
+        elif all(s in ('Ready', 'Released') for s in statuses):
+            agg_status = 'Ready'
+        elif any(s in ('In-Progress', 'Ready', 'Released') for s in statuses):
+            agg_status = 'In-Progress'
+        else:
+            agg_status = 'Received'
+            
+        cursor.execute("UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?", (agg_status, order_id))
+        
+        # Recalculate payment status
+        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
+        unpaid_count = cursor.fetchone()[0]
+        if unpaid_count == 0:
+            cursor.execute("SELECT Order_Payed_At FROM ORDERS WHERE OrderID = ?", (order_id,))
+            p_at = cursor.fetchone()
+            if not p_at or not p_at[0]:
+                from datetime import datetime
+                cursor.execute("UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_id))
+        else:
+            cursor.execute("UPDATE ORDERS SET Order_Payed_At = NULL WHERE OrderID = ?", (order_id,))
+            
+        conn.commit()
+        return True, False  # success, parent order NOT deleted
+
+
+def update_service_details(order_id, service_id, weight, subtotal, status, paid_val):
+    from datetime import datetime
+    import re
+    
+    if status == "Released" and not paid_val:
+        raise ValueError("Cannot mark service as Released. This service must be paid first.")
+
+    # Parse numeric weight value and unit from input string robustly
+    qty_value = 0.0
+    unit = 'pcs'
+    if isinstance(weight, (int, float)):
+        qty_value = float(weight)
+    elif isinstance(weight, str):
+        s = weight.strip().lower()
+        m = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*kg", s)
+        if m:
+            qty_value = float(m.group(1))
+            unit = 'kg'
+        else:
+            m2 = re.match(r"^([0-9]+)\s*(?:x|pcs|pc)?", s)
+            if m2:
+                qty_value = float(m2.group(1))
+                unit = 'pcs'
+            else:
+                m3 = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
+                if m3:
+                    qty_value = float(m3.group(1))
+                    unit = 'kg' if '.' in m3.group(1) else 'pcs'
+                else:
+                    qty_value = 0.0
+                    unit = 'pcs'
+
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        
+        # Determine paid timestamp
+        if paid_val:
+            cursor.execute("SELECT Service_Payed_At FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+            curr_paid = cursor.fetchone()
+            if curr_paid and curr_paid[0]:
+                paid_at = curr_paid[0]
+            else:
+                paid_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            paid_at = None
+            
+        cursor.execute("""
+            UPDATE ORDER_DETAILS
+            SET Item_Weight = ?, Item_Unit = ?, Order_Subtotal = ?, Service_Status = ?, Service_Payed_At = ?
+            WHERE OrderID = ? AND ServiceID = ?
+        """, (qty_value, unit, subtotal, status, paid_at, order_id, service_id))
+        
+        # Recalculate parent order price
+        cursor.execute("SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
+        new_total = cursor.fetchone()[0] or 0
+        cursor.execute("UPDATE ORDERS SET Order_Total_Price = ? WHERE OrderID = ?", (new_total, order_id))
+        
+        # Recalculate parent order status
+        cursor.execute("SELECT IFNULL(Service_Status, 'Received') FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
+        statuses = [r[0] for r in cursor.fetchall()]
+        
+        if all(s == 'Released' for s in statuses):
+            agg_status = 'Released'
+        elif all(s in ('Ready', 'Released') for s in statuses):
+            agg_status = 'Ready'
+        elif any(s in ('In-Progress', 'Ready', 'Released') for s in statuses):
+            agg_status = 'In-Progress'
+        else:
+            agg_status = 'Received'
+            
+        cursor.execute("UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?", (agg_status, order_id))
+        
+        # Recalculate parent order payment status
+        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
+        unpaid_count = cursor.fetchone()[0]
+        if unpaid_count == 0:
+            cursor.execute("SELECT Order_Payed_At FROM ORDERS WHERE OrderID = ?", (order_id,))
+            p_at = cursor.fetchone()
+            if not p_at or not p_at[0]:
+                cursor.execute("UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_id))
+        else:
+            cursor.execute("UPDATE ORDERS SET Order_Payed_At = NULL WHERE OrderID = ?", (order_id,))
+            
+        conn.commit()
+        return True

@@ -806,16 +806,23 @@ class ViewOrderPage(tk.Frame):
         # helper to create tree (optionally include Action column)
         def make_tree(parent, include_action=True):
             cols = list(all_columns)
+            if 'OrderID' in cols:
+                cols.remove('OrderID')
             if include_action:
                 cols.append('Action')
             frame = tk.Frame(parent)
             frame.pack(fill='both', expand=True)
             scrollbar = ttk.Scrollbar(frame)
             scrollbar.pack(side='right', fill='y')
-            tree = ttk.Treeview(frame, columns=cols, show="headings", yscrollcommand=scrollbar.set)
+            tree = ttk.Treeview(frame, columns=cols, show="tree headings", yscrollcommand=scrollbar.set)
             # keep a reference to scrollbar so we can bind its events later
             tree._scrollbar = scrollbar
             scrollbar.config(command=tree.yview)
+            
+            # Configure #0 column as OrderID
+            tree.heading('#0', text='OrderID')
+            tree.column('#0', width=100, anchor='w')
+            
             for col in cols:
                 tree.heading(col, text=col)
                 tree.column(col, width=120 if col not in ('Action', 'Qty/Wt') else 80, anchor='w')
@@ -835,6 +842,8 @@ class ViewOrderPage(tk.Frame):
             t.bind('<Configure>', lambda e: self._reposition_action_overlays(e), add='+')
             t.bind('<ButtonRelease-1>', lambda e: self._reposition_action_overlays(e), add='+')
             t.bind('<MouseWheel>', lambda e: self._reposition_action_overlays(e), add='+')
+            t.bind('<<TreeviewOpen>>', lambda e: self._reposition_action_overlays(e), add='+')
+            t.bind('<<TreeviewClose>>', lambda e: self._reposition_action_overlays(e), add='+')
             try:
                 # scrollbar exists as attribute _scrollbar
                 t._scrollbar.bind('<ButtonRelease-1>', lambda e: self._reposition_action_overlays(e), add='+')
@@ -904,21 +913,37 @@ class ViewOrderPage(tk.Frame):
                 pass
         self.action_overlays[tree] = {}
 
+    def _order_id_from_iid(self, iid):
+        """Extract numeric order_id from an iid that may be '42', '42-1', or '42-total'."""
+        try:
+            return int(str(iid).split('-')[0])
+        except Exception:
+            return None
+
     def _create_action_overlays(self, tree):
-        # create Label widgets positioned over the Action column cells (per-tree)
+        # create Label widgets positioned over the Action column cells (per-tree).
+        # Place Edit overlays on all parent and child rows representing an order or service.
         self._clear_action_overlays(tree)
         cols = list(tree['columns'])
         if 'Action' not in cols:
             return
         action_col_index = cols.index('Action') + 1
         treemap = {}
-        for iid in tree.get_children():
+
+        def get_all_items(parent=''):
+            items = []
+            for item in tree.get_children(parent):
+                items.append(item)
+                items.extend(get_all_items(item))
+            return items
+
+        all_iids = get_all_items()
+
+        for iid in all_iids:
+            order_id = self._order_id_from_iid(iid)
+            if order_id is None:
+                continue
             try:
-                bbox = tree.bbox(iid, f"#{action_col_index}")
-                if not bbox:
-                    continue
-                x, y, w, h = bbox
-                # create a visible blue-underlined label (link style)
                 try:
                     link_font = tkfont.Font(family="Segoe UI", size=9, underline=1)
                 except Exception:
@@ -926,31 +951,47 @@ class ViewOrderPage(tk.Frame):
                         link_font = tkfont.Font(underline=1)
                     except Exception:
                         link_font = None
+
                 lbl = tk.Label(tree, text='Edit', fg='#0563c1', cursor='hand2', bg='white', bd=0)
                 if link_font:
                     try:
                         lbl.config(font=link_font)
                     except Exception:
                         pass
-                # bind before placing to capture iid
-                lbl.bind('<Button-1>', lambda e, id=iid: self.open_edit_window(int(id)))
-                lbl.place(x=x+2, y=y+1, width=w-4, height=h-2)
-                lbl.lift()
+                lbl.bind('<Button-1>', lambda e, target_iid=iid: self.open_edit_window(target_iid))
                 treemap[iid] = lbl
+
+                bbox = tree.bbox(iid, f"#{action_col_index}")
+                if bbox:
+                    x, y, w, h = bbox
+                    lbl.place(x=x+2, y=y+1, width=w-4, height=h-2)
+                    lbl.lift()
+                else:
+                    lbl.place_forget()
             except Exception:
                 continue
         self.action_overlays[tree] = treemap
 
     def _reposition_action_overlays(self, event=None):
-        # reposition existing overlays (call on configure/scroll)
+        # reposition existing overlays (call on configure/scroll/expand/collapse)
         for tree in (self.unpaid_tree, self.paid_tree):
             treemap = self.action_overlays.get(tree, {})
             cols = list(tree['columns'])
             if 'Action' not in cols:
                 continue
             action_col_index = cols.index('Action') + 1
+
+            def get_all_items(parent=''):
+                items = []
+                for item in tree.get_children(parent):
+                    items.append(item)
+                    items.extend(get_all_items(item))
+                return items
+
+            all_iids = set(get_all_items())
+
             for iid, lbl in list(treemap.items()):
-                if iid not in tree.get_children():
+                if iid not in all_iids:
                     try:
                         lbl.destroy()
                     except Exception:
@@ -975,6 +1016,84 @@ class ViewOrderPage(tk.Frame):
             if not self.action_overlays.get(tree):
                 del self.action_overlays[tree]
 
+    def _insert_order_rows(self, tree, order, include_action=True):
+        """Insert a collapsible parent row with individual service child rows for mixed orders.
+        For single-service orders, insert a single flat row.
+        """
+        import db
+        oid = order['OrderID']
+        date_str = order['Order_Received_At']
+        customer = f"{order['First_Name']} {order['Last_Name']}"
+        status = order['Order_Status']
+        paid = "Yes" if order['Order_Payed_At'] else "No"
+        total = order['Order_Total_Price']
+
+        try:
+            svc_rows = db.get_order_service_rows(oid)
+        except Exception:
+            svc_rows = []
+
+        parent_iid = str(oid)
+
+        if not svc_rows:
+            # Fallback: single generic row
+            vals = [date_str, customer, "—", "—", status, f"₱{total}", paid]
+            if include_action:
+                vals.append('')
+            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(vals))
+            return
+
+        is_mixed = len(svc_rows) > 1
+
+        if not is_mixed:
+            # Single-service order: display as flat row
+            srow = svc_rows[0]
+            vals = [
+                date_str,
+                customer,
+                srow['service_name'],
+                srow['qty_display'],
+                status,
+                f"₱{total}",
+                paid,
+            ]
+            if include_action:
+                vals.append('')
+            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(vals))
+        else:
+            # Mixed-service order: parent row collapsed by default
+            try:
+                qty_sum = db.get_order_qty_display(oid)
+            except Exception:
+                qty_sum = "—"
+            parent_vals = [
+                date_str,
+                customer,
+                f"Mixed Services ({len(svc_rows)})",
+                qty_sum,
+                status,
+                f"₱{total}",
+                paid,
+            ]
+            if include_action:
+                parent_vals.append('')
+            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(parent_vals), open=False, tags=('parent_mixed',))
+
+            for srow in svc_rows:
+                svc_iid = f"{oid}-{srow['service_id']}"
+                child_vals = [
+                    '',  # Date Received blank
+                    '',  # Customer blank
+                    srow['service_name'],
+                    srow['qty_display'],
+                    srow['status'],  # Service status
+                    f"₱{srow['subtotal']:.0f}",
+                    srow['paid'],  # Service paid
+                ]
+                if include_action:
+                    child_vals.append('')
+                tree.insert(parent_iid, 'end', iid=svc_iid, text=svc_iid, values=tuple(child_vals), tags=('child_service',))
+
     def refresh_unpaid(self):
         import db
         tree = self.unpaid_tree
@@ -983,20 +1102,7 @@ class ViewOrderPage(tk.Frame):
         try:
             orders = db.get_unpaid_orders()
             for order in orders:
-                service_display = db.get_order_services(order['OrderID'])
-                qty_display = db.get_order_qty_display(order['OrderID'])
-                tree.insert("", "end", iid=order['OrderID'], values=(
-                    order['OrderID'],
-                    order['Order_Received_At'],
-                    f"{order['First_Name']} {order['Last_Name']}",
-                    service_display,
-                    qty_display,
-                    order['Order_Status'],
-                    f"₱{order['Order_Total_Price']}",
-                    "Yes" if order['Order_Payed_At'] else "No",
-                    ""
-                ))
-            # create overlays for action column
+                self._insert_order_rows(tree, order, include_action=True)
             try:
                 self._create_action_overlays(tree)
             except Exception:
@@ -1012,20 +1118,7 @@ class ViewOrderPage(tk.Frame):
         try:
             orders = db.get_paid_orders()
             for order in orders:
-                service_display = db.get_order_services(order['OrderID'])
-                qty_display = db.get_order_qty_display(order['OrderID'])
-                tree.insert("", "end", iid=order['OrderID'], values=(
-                    order['OrderID'],
-                    order['Order_Received_At'],
-                    f"{order['First_Name']} {order['Last_Name']}",
-                    service_display,
-                    qty_display,
-                    order['Order_Status'],
-                    f"₱{order['Order_Total_Price']}",
-                    "Yes",
-                    ""
-                ))
-            # create overlays for action column
+                self._insert_order_rows(tree, order, include_action=True)
             try:
                 self._create_action_overlays(tree)
             except Exception:
@@ -1041,29 +1134,16 @@ class ViewOrderPage(tk.Frame):
         try:
             orders = db.get_archived_orders()
             for order in orders:
-                service_display = db.get_order_services(order['OrderID'])
-                qty_display = db.get_order_qty_display(order['OrderID'])
-                tree.insert("", "end", iid=order['OrderID'], values=(
-                    order['OrderID'],
-                    order['Order_Received_At'],
-                    f"{order['First_Name']} {order['Last_Name']}",
-                    service_display,
-                    qty_display,
-                    order['Order_Status'],
-                    f"₱{order['Order_Total_Price']}",
-                    "Yes"
-                ))
+                self._insert_order_rows(tree, order, include_action=False)
         except Exception as e:
             print(f"Error loading archived orders: {e}")
 
     def search_orders(self):
-        
         term = self.search_entry.get().strip()
         if not term:
             self.refresh_all()
             return
         import db
-        # search within the currently selected tab
         idx = self.notebook.index(self.notebook.select())
         if idx == 0:
             orders = db.get_unpaid_orders()
@@ -1079,26 +1159,64 @@ class ViewOrderPage(tk.Frame):
             tree.delete(item)
 
         found = False
+        matching_iids = []
+
         for order in orders:
-            if str(order['OrderID']).startswith(term):
-                service_display = db.get_order_services(order['OrderID'])
-                qty_display = db.get_order_qty_display(order['OrderID'])
-                vals = [order['OrderID'], order['Order_Received_At'], f"{order['First_Name']} {order['Last_Name']}", service_display, qty_display, order['Order_Status'], f"₱{order['Order_Total_Price']}", "Yes" if order['Order_Payed_At'] else "No"]
-                if idx in (0,1):
-                    vals.append('')
-                    tree.insert("", "end", iid=order['OrderID'], values=tuple(vals))
-                else:
-                    tree.insert("", "end", iid=order['OrderID'], values=tuple(vals))
+            oid = order['OrderID']
+            customer_name = f"{order['First_Name']} {order['Last_Name']}"
+            try:
+                svc_rows = db.get_order_service_rows(oid)
+            except Exception:
+                svc_rows = []
+
+            order_matched = False
+            matched_child_iids = []
+
+            # 1. Match by parent OrderID
+            if str(oid).startswith(term):
+                order_matched = True
+
+            # 2. Match by customer name
+            if term.lower() in customer_name.lower():
+                order_matched = True
+
+            # 3. Match by child service ID or service name
+            for srow in svc_rows:
+                child_iid = f"{oid}-{srow['service_id']}"
+                if child_iid.startswith(term) or term == child_iid:
+                    order_matched = True
+                    matched_child_iids.append(child_iid)
+                elif term.lower() in srow['service_name'].lower():
+                    order_matched = True
+                    matched_child_iids.append(child_iid)
+
+            if order_matched:
+                include_action = (idx in (0, 1))
+                self._insert_order_rows(tree, order, include_action=include_action)
                 found = True
-        # create overlays for action column on search results
+
+                if matched_child_iids:
+                    # Expand parent row immediately so children are drawn and can be selected
+                    tree.item(str(oid), open=True)
+                    matching_iids.extend(matched_child_iids)
+
         try:
-            if idx in (0,1):
+            if idx in (0, 1):
                 self._create_action_overlays(tree)
         except Exception:
             pass
+
+        # Select and scroll to the matched child items
+        if matching_iids:
+            try:
+                tree.selection_set(matching_iids)
+                tree.see(matching_iids[0])
+            except Exception:
+                pass
+
         if not found:
             from tkinter import messagebox
-            messagebox.showinfo("Search", f"No orders found with ID starting with '{term}'")
+            messagebox.showinfo("Search", f"No orders found matching '{term}'")
 
     def search_by_date(self):
         import db
@@ -1108,7 +1226,6 @@ class ViewOrderPage(tk.Frame):
         if not start_raw or not end_raw or start_raw in ("mm/dd/yyyy","") or end_raw in ("mm/dd/yyyy",""):
             messagebox.showwarning('Date Search', 'Please enter both From and To dates in mm/dd/yyyy format')
             return
-        # try parsing either mm/dd/yyyy or yyyy-mm-dd
         from datetime import datetime
         def parse_date(s):
             for fmt in ('%m/%d/%Y','%Y-%m-%d'):
@@ -1142,26 +1259,18 @@ class ViewOrderPage(tk.Frame):
         except Exception as e:
             messagebox.showerror('Date Search', f'Database error: {e}')
             return
-        # populate tree
         for item in tree.get_children():
             tree.delete(item)
+        include_action = (idx in (0, 1))
         for order in orders:
-            service_display = db.get_order_services(order['OrderID'])
-            qty_display = db.get_order_qty_display(order['OrderID'])
-            vals = [order['OrderID'], order['Order_Received_At'], f"{order['First_Name']} {order['Last_Name']}", service_display, qty_display, order['Order_Status'], f"₱{order['Order_Total_Price']}", 'Yes' if order['Order_Payed_At'] else 'No']
-            if idx in (0,1):
-                vals.append('')
-                tree.insert('', 'end', iid=order['OrderID'], values=tuple(vals))
-            else:
-                tree.insert('', 'end', iid=order['OrderID'], values=tuple(vals))
+            self._insert_order_rows(tree, order, include_action=include_action)
         try:
-            if idx in (0,1):
+            if idx in (0, 1):
                 self._create_action_overlays(tree)
         except Exception:
             pass
 
     def sort_by_status(self, status):
-        # find current tab and filter that tree
         idx = self.notebook.index(self.notebook.select())
         import db
         if idx == 0:
@@ -1174,12 +1283,10 @@ class ViewOrderPage(tk.Frame):
             tree = self.archived_tree
             orders = db.get_archived_orders()
 
-        # clear
         for item in tree.get_children():
             tree.delete(item)
 
         if status == 'All':
-            # refresh this tab
             if idx == 0:
                 self.refresh_unpaid()
             elif idx == 1:
@@ -1190,18 +1297,11 @@ class ViewOrderPage(tk.Frame):
 
         try:
             orders = [o for o in orders if o['Order_Status'] == status]
+            include_action = (idx in (0, 1))
             for order in orders:
-                service_display = db.get_order_services(order['OrderID'])
-                qty_display = db.get_order_qty_display(order['OrderID'])
-                vals = (order['OrderID'], order['Order_Received_At'], f"{order['First_Name']} {order['Last_Name']}", service_display, qty_display, order['Order_Status'], f"₱{order['Order_Total_Price']}", "Yes" if order['Order_Payed_At'] else "No")
-                if idx in (0,1):
-                    vals = tuple(list(vals) + [''])
-                    tree.insert("", "end", iid=order['OrderID'], values=vals)
-                else:
-                    tree.insert("", "end", iid=order['OrderID'], values=vals)
-            # after populating sorted list, create overlays
+                self._insert_order_rows(tree, order, include_action=include_action)
             try:
-                if idx in (0,1):
+                if idx in (0, 1):
                     self._create_action_overlays(tree)
             except Exception:
                 pass
@@ -1230,11 +1330,21 @@ class ViewOrderPage(tk.Frame):
         form_frame.pack(fill="both", expand=True, padx=30, pady=30)
         form_frame.columnconfigure(1, weight=1)
 
-        # Order selection: use a freeform search entry (supports order ID or customer name search)
-        tk.Label(form_frame, text="Order ID / Customer:", font=("Arial", 11), bg="white").grid(row=0, column=0, sticky="w", pady=15)
-        order_entry_var = tk.StringVar()
+        # Pre-populate and initialize if selected
+        selected_order_id = ""
+        tree = self.get_tree_for_current_tab()
+        if tree:
+            sel = tree.selection()
+            if sel:
+                selected_order_id = str(sel[0])
+
+        order_entry_var = tk.StringVar(value=selected_order_id)
         order_entry = tk.Entry(form_frame, textvariable=order_entry_var, width=30, font=("Arial", 10))
         order_entry.grid(row=0, column=1, sticky="ew", pady=15, padx=10)
+
+        # Order selection: use a freeform search entry (supports order ID or customer name search)
+        tk.Label(form_frame, text="Order ID / Customer:", font=("Arial", 11), bg="white").grid(row=0, column=0, sticky="w", pady=15)
+
         def _choose_from_matches(matches):
             # matches: list of (OrderID, display)
             pick_win = tk.Toplevel(status_win)
@@ -1251,23 +1361,48 @@ class ViewOrderPage(tk.Frame):
                 text = lb.get(sel[0])
                 oid = text.split(' - ', 1)[0]
                 order_entry_var.set(oid)
+                try:
+                    o = db.get_order_details(int(oid))
+                    if o:
+                        status_combo.set(o['Order_Status'])
+                except:
+                    pass
                 pick_win.destroy()
             btnf = tk.Button(pick_win, text='Select', command=_select)
             btnf.pack(pady=6)
+
         def _find_order():
             q = order_entry_var.get().strip()
             if not q:
                 messagebox.showwarning('Find Order', 'Enter Order ID or Customer name', parent=status_win)
                 return
+            
+            # Support child IDs like "5-3" by parsing the parent OrderID and ServiceID
+            if '-' in q:
+                try:
+                    parts = q.split('-')
+                    oid_clean = int(parts[0])
+                    svc_id = int(parts[1])
+                    svc_rows = db.get_order_service_rows(oid_clean)
+                    target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+                    if target_svc:
+                        status_combo.set(target_svc['status'])
+                        o = db.get_order_details(oid_clean)
+                        messagebox.showinfo('Find Order', f"Found Service {svc_id} ({target_svc['service_name']}) for Order {oid_clean} ({o['First_Name']} {o['Last_Name']})\nCurrent Status: {target_svc['status']}", parent=status_win)
+                        return
+                except Exception:
+                    pass
+
             # if numeric, try fetch by ID
             if q.isdigit():
                 o = db.get_order_details(int(q))
                 if not o:
                     messagebox.showinfo('Find Order', f'Order {q} not found', parent=status_win)
                     return
-                # show brief info
+                # show brief info and update status combo
                 order_entry_var.set(str(o['OrderID']))
-                messagebox.showinfo('Find Order', f"Found Order {o['OrderID']} for {o['First_Name']} {o['Last_Name']}", parent=status_win)
+                status_combo.set(o['Order_Status'])
+                messagebox.showinfo('Find Order', f"Found Order {o['OrderID']} for {o['First_Name']} {o['Last_Name']}\nCurrent Status: {o['Order_Status']}", parent=status_win)
                 return
             # otherwise search by name (simple filter)
             all_orders = db.get_orders()
@@ -1282,6 +1417,9 @@ class ViewOrderPage(tk.Frame):
                 return
             if len(matches) == 1:
                 order_entry_var.set(str(matches[0][0]))
+                o = db.get_order_details(int(matches[0][0]))
+                if o:
+                    status_combo.set(o['Order_Status'])
                 messagebox.showinfo('Find Order', f"Found Order {matches[0][0]} for {matches[0][1]}", parent=status_win)
                 return
             # multiple matches - let user pick
@@ -1293,6 +1431,23 @@ class ViewOrderPage(tk.Frame):
         status_combo = ttk.Combobox(form_frame, values=["Received", "In-Progress", "Ready", "Released"], width=30, state="readonly", font=("Arial", 10))
         status_combo.grid(row=1, column=1, sticky="ew", pady=15, padx=10)
 
+        # Initialize status if pre-populated
+        if selected_order_id:
+            try:
+                oid_clean = selected_order_id.split('-')[0]
+                if '-' in selected_order_id:
+                    svc_id = int(selected_order_id.split('-')[1])
+                    svc_rows = db.get_order_service_rows(int(oid_clean))
+                    target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+                    if target_svc:
+                        status_combo.set(target_svc['status'])
+                else:
+                    o = db.get_order_details(int(oid_clean))
+                    if o:
+                        status_combo.set(o['Order_Status'])
+            except Exception:
+                pass
+
         def update_and_close():
             order_id = order_entry_var.get().strip()
             new_status = status_combo.get()
@@ -1300,8 +1455,14 @@ class ViewOrderPage(tk.Frame):
                 messagebox.showwarning("Error", "Please select an order and status", parent=status_win)
                 return
             try:
-                db.update_order(int(order_id), new_status, None)
-                messagebox.showinfo("Success", f"Order {order_id} status updated to {new_status}", parent=status_win)
+                if '-' in order_id:
+                    oid_clean = order_id.split('-')[0]
+                    svc_id = int(order_id.split('-')[1])
+                    db.update_service_status(int(oid_clean), svc_id, new_status)
+                    messagebox.showinfo("Success", f"Service {order_id} status updated to {new_status}", parent=status_win)
+                else:
+                    db.update_order_status(int(order_id), new_status)
+                    messagebox.showinfo("Success", f"Order {order_id} status updated to {new_status}", parent=status_win)
                 self.refresh_all()
                 status_win.destroy()
             except Exception as e:
@@ -1335,11 +1496,19 @@ class ViewOrderPage(tk.Frame):
         form_frame.pack(fill="both", expand=True, padx=30, pady=30)
         form_frame.columnconfigure(1, weight=1)
 
-        # Order selection via search entry for scalability
-        tk.Label(form_frame, text="Order ID / Customer:", font=("Arial", 11), bg="white").grid(row=0, column=0, sticky="w", pady=12)
-        order_entry_var = tk.StringVar()
+        # Pre-populate and initialize if selected
+        selected_order_id = ""
+        tree = self.get_tree_for_current_tab()
+        if tree:
+            sel = tree.selection()
+            if sel:
+                selected_order_id = str(sel[0])
+
+        order_entry_var = tk.StringVar(value=selected_order_id)
         order_entry = tk.Entry(form_frame, textvariable=order_entry_var, width=30, font=("Arial", 10))
         order_entry.grid(row=0, column=1, sticky="ew", pady=12, padx=10)
+
+        tk.Label(form_frame, text="Order ID / Customer:", font=("Arial", 11), bg="white").grid(row=0, column=0, sticky="w", pady=12)
 
         def _choose_from_matches_payment(matches):
             pick_win = tk.Toplevel(payment_win)
@@ -1372,6 +1541,22 @@ class ViewOrderPage(tk.Frame):
             if not q:
                 messagebox.showwarning('Find Order', 'Enter Order ID or Customer name', parent=payment_win)
                 return
+            
+            # Support child IDs like "5-3" by parsing the parent OrderID and ServiceID
+            if '-' in q:
+                try:
+                    parts = q.split('-')
+                    oid_clean = int(parts[0])
+                    svc_id = int(parts[1])
+                    svc_rows = db.get_order_service_rows(oid_clean)
+                    target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+                    if target_svc:
+                        amount_due_display.config(text=f"₱{target_svc['subtotal']:.2f}")
+                        cash_entry.delete(0, tk.END)
+                        return
+                except Exception:
+                    pass
+
             if q.isdigit():
                 o = db.get_order_details(int(q))
                 if not o:
@@ -1402,7 +1587,25 @@ class ViewOrderPage(tk.Frame):
 
         tk.Button(form_frame, text='Find', command=_find_order_payment).grid(row=0, column=2, padx=6)
 
-        amount_due_display = tk.Label(form_frame, text="0.00", font=("Arial", 13, "bold"), bg="#ecf0f1", fg="#2c3e50", relief="sunken", width=35)
+        # Set initial amount due if pre-populated
+        initial_amount = "0.00"
+        if selected_order_id:
+            try:
+                oid_clean = selected_order_id.split('-')[0]
+                if '-' in selected_order_id:
+                    svc_id = int(selected_order_id.split('-')[1])
+                    svc_rows = db.get_order_service_rows(int(oid_clean))
+                    target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+                    if target_svc:
+                        initial_amount = f"₱{target_svc['subtotal']:.2f}"
+                else:
+                    o = db.get_order_details(int(oid_clean))
+                    if o:
+                        initial_amount = f"₱{o['Order_Total_Price']:.2f}"
+            except Exception:
+                pass
+
+        amount_due_display = tk.Label(form_frame, text=initial_amount, font=("Arial", 13, "bold"), bg="#ecf0f1", fg="#2c3e50", relief="sunken", width=35)
         amount_due_display.grid(row=1, column=1, sticky="ew", pady=12, padx=10)
         tk.Label(form_frame, text="Amount Due (₱):", font=("Arial", 11), bg="white").grid(row=1, column=0, sticky="w", pady=12)
 
@@ -1411,14 +1614,19 @@ class ViewOrderPage(tk.Frame):
         tk.Label(form_frame, text="Cash Received (₱):", font=("Arial", 11), bg="white").grid(row=2, column=0, sticky="w", pady=12)
 
         def process_payment():
-            order_id = order_entry_var.get()
-            cash_str = cash_entry.get()
+            order_id = order_entry_var.get().strip()
+            cash_str = cash_entry.get().strip()
             if not order_id or not cash_str:
                 messagebox.showwarning("Error", "Please select an order and enter cash amount", parent=payment_win)
                 return
             try:
                 cash = float(cash_str)
-                result = db.process_payment(int(order_id), cash)
+                if '-' in order_id:
+                    oid_clean = order_id.split('-')[0]
+                    svc_id = int(order_id.split('-')[1])
+                    result = db.process_service_payment(int(oid_clean), svc_id, cash)
+                else:
+                    result = db.process_payment(int(order_id), cash)
                 if not result['success']:
                     messagebox.showerror("Payment Error", result['message'], parent=payment_win)
                     return
@@ -1450,35 +1658,42 @@ class ViewOrderPage(tk.Frame):
     def on_tree_click(self, event):
         """Detect clicks on the 'Action' column and open edit window"""
         widget = event.widget
-        # which column was clicked
         col = widget.identify_column(event.x)
-        # last column is Action - find its index
-        # identify_column returns like '#1', '#2' ...
         if col == f"#{len(widget['columns'])}":
             row_id = widget.identify_row(event.y)
             if not row_id:
                 return
-            try:
-                order_id = int(row_id)
-            except ValueError:
+            s = str(row_id)
+            if s.endswith('-total') or s.endswith('-0'):
                 return
-            self.open_edit_window(order_id)
+            self.open_edit_window(row_id)
 
-    def open_edit_window(self, order_id):
+    def open_edit_window(self, target_id):
         import db
         from tkinter import messagebox
-        order = db.get_order_details(int(order_id))
+        import sqlite3
+
+        # Parse target ID
+        is_child = '-' in str(target_id)
+        if is_child:
+            oid = int(str(target_id).split('-')[0])
+            svc_id = int(str(target_id).split('-')[1])
+        else:
+            oid = int(target_id)
+
+        # Get parent order details for reference
+        order = db.get_order_details(oid)
         if not order:
             messagebox.showerror("Not found", "Order not found")
             return
-        # normalize sqlite3.Row to dict so .get() works
+        
         try:
             order = dict(order)
         except Exception:
             pass
 
         edit_win = tk.Toplevel(self)
-        edit_win.title(f"Edit Order {order_id}")
+        edit_win.title(f"Edit Order {target_id}" if not is_child else f"Edit Service {target_id}")
         edit_win.geometry("520x420")
         edit_win.resizable(False, False)
         edit_win.grab_set()
@@ -1487,57 +1702,129 @@ class ViewOrderPage(tk.Frame):
         form.pack(fill='both', expand=True)
         form.columnconfigure(1, weight=1)
 
-        # First and Last Name fields
-        tk.Label(form, text="First Name:").grid(row=0, column=0, sticky='w')
-        first_name = tk.Entry(form)
-        first_name.grid(row=0, column=1, sticky='ew')
-        first_name.insert(0, order.get('First_Name',''))
+        if not is_child:
+            # Edit Parent Order UI
+            tk.Label(form, text="First Name:").grid(row=0, column=0, sticky='w')
+            first_name = tk.Entry(form)
+            first_name.grid(row=0, column=1, sticky='ew')
+            first_name.insert(0, order.get('First_Name',''))
 
-        tk.Label(form, text="Last Name:").grid(row=1, column=0, sticky='w')
-        last_name = tk.Entry(form)
-        last_name.grid(row=1, column=1, sticky='ew')
-        last_name.insert(0, order.get('Last_Name',''))
+            tk.Label(form, text="Last Name:").grid(row=1, column=0, sticky='w')
+            last_name = tk.Entry(form)
+            last_name.grid(row=1, column=1, sticky='ew')
+            last_name.insert(0, order.get('Last_Name',''))
 
-        tk.Label(form, text="Email:").grid(row=2, column=0, sticky='w')
-        email = tk.Entry(form)
-        email.grid(row=2, column=1, sticky='ew')
-        email.insert(0, order.get('Email',''))
+            tk.Label(form, text="Email:").grid(row=2, column=0, sticky='w')
+            email = tk.Entry(form)
+            email.grid(row=2, column=1, sticky='ew')
+            email.insert(0, order.get('Email',''))
 
-        tk.Label(form, text="Phone:").grid(row=3, column=0, sticky='w')
-        ph = tk.Entry(form)
-        ph.grid(row=3, column=1, sticky='ew')
-        ph.insert(0, order.get('Phone_Number',''))
+            tk.Label(form, text="Phone:").grid(row=3, column=0, sticky='w')
+            ph = tk.Entry(form)
+            ph.grid(row=3, column=1, sticky='ew')
+            ph.insert(0, order.get('Phone_Number',''))
 
-        tk.Label(form, text="Status:").grid(row=4, column=0, sticky='w')
-        status = ttk.Combobox(form, values=["Received","In-Progress","Ready","Released"], state='readonly')
-        status.grid(row=4, column=1, sticky='ew')
-        status.set(order['Order_Status'])
+            tk.Label(form, text="Status:").grid(row=4, column=0, sticky='w')
+            status = ttk.Combobox(form, values=["Received","In-Progress","Ready","Released"], state='readonly')
+            status.grid(row=4, column=1, sticky='ew')
+            status.set(order['Order_Status'])
 
-        tk.Label(form, text="Notes:").grid(row=5, column=0, sticky='nw')
-        notes = tk.Text(form, height=6)
-        notes.grid(row=5, column=1, sticky='ew')
-        notes.insert('1.0', order.get('Order_Notes') or '')
+            tk.Label(form, text="Notes:").grid(row=5, column=0, sticky='nw')
+            notes = tk.Text(form, height=6)
+            notes.grid(row=5, column=1, sticky='ew')
+            notes.insert('1.0', order.get('Order_Notes') or '')
 
-        def save_changes():
-            try:
-                # read first and last name fields
-                first = first_name.get().strip()
-                last = last_name.get().strip()
-                # update customer (CustomerID, First, Last, Phone, Email, Address)
-                db.update_customer(order['CustomerID'], first, last, ph.get().strip(), email.get().strip(), '')
-                # update order
-                db.update_order(order_id, status.get(), notes.get('1.0', 'end-1c').strip())
-                messagebox.showinfo('Saved', 'Order updated')
+            def save_changes():
+                try:
+                    first = first_name.get().strip()
+                    last = last_name.get().strip()
+                    db.update_customer(order['CustomerID'], first, last, ph.get().strip(), email.get().strip(), '')
+                    db.update_order(oid, status.get(), notes.get('1.0', 'end-1c').strip())
+                    messagebox.showinfo('Saved', 'Order updated')
+                    edit_win.destroy()
+                    self.refresh_all()
+                except Exception as e:
+                    messagebox.showerror('Error', str(e))
+
+            def delete_target():
+                if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete Order {oid}?\nThis will permanently delete the order and all its items."):
+                    try:
+                        db.delete_order(oid)
+                        messagebox.showinfo("Deleted", f"Order {oid} has been deleted.")
+                        edit_win.destroy()
+                        self.refresh_all()
+                    except Exception as e:
+                        messagebox.showerror('Error', str(e))
+
+        else:
+            # Edit Child Service UI
+            svc_rows = db.get_order_service_rows(oid)
+            target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+            if not target_svc:
+                messagebox.showerror("Not found", f"Service details not found for service {svc_id}")
                 edit_win.destroy()
-                self.refresh_all()
-            except Exception as e:
-                messagebox.showerror('Error', str(e))
+                return
 
+            tk.Label(form, text="Service Name:").grid(row=0, column=0, sticky='w', pady=8)
+            tk.Label(form, text=target_svc['service_name'], font=("Arial", 11, "bold")).grid(row=0, column=1, sticky='w', pady=8)
+
+            tk.Label(form, text="Qty/Wt:").grid(row=1, column=0, sticky='w', pady=8)
+            qty_entry = tk.Entry(form)
+            qty_entry.grid(row=1, column=1, sticky='ew', pady=8)
+            qty_entry.insert(0, str(target_svc['qty_display']))
+
+            tk.Label(form, text="Subtotal (₱):").grid(row=2, column=0, sticky='w', pady=8)
+            subtotal_entry = tk.Entry(form)
+            subtotal_entry.grid(row=2, column=1, sticky='ew', pady=8)
+            subtotal_entry.insert(0, f"{target_svc['subtotal']:.2f}")
+
+            tk.Label(form, text="Status:").grid(row=3, column=0, sticky='w', pady=8)
+            status_combo = ttk.Combobox(form, values=["Received","In-Progress","Ready","Released"], state='readonly')
+            status_combo.grid(row=3, column=1, sticky='ew', pady=8)
+            status_combo.set(target_svc['status'])
+
+            tk.Label(form, text="Paid:").grid(row=4, column=0, sticky='w', pady=8)
+            paid_combo = ttk.Combobox(form, values=["Yes", "No"], state='readonly')
+            paid_combo.grid(row=4, column=1, sticky='ew', pady=8)
+            paid_combo.set(target_svc['paid'])
+
+            def save_changes():
+                try:
+                    qty_val = qty_entry.get().strip()
+                    subtotal = float(subtotal_entry.get().strip())
+                    status = status_combo.get()
+                    paid_val = paid_combo.get() == "Yes"
+                    
+                    db.update_service_details(oid, svc_id, qty_val, subtotal, status, paid_val)
+                    messagebox.showinfo('Saved', 'Service details updated')
+                    edit_win.destroy()
+                    self.refresh_all()
+                except ValueError:
+                    messagebox.showerror('Error', 'Subtotal must be a valid number')
+                except Exception as e:
+                    messagebox.showerror('Error', str(e))
+
+            def delete_target():
+                if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete service {target_svc['service_name']} ({target_id})?\nIf this is the only service in the order, the order itself will be deleted."):
+                    try:
+                        _, parent_deleted = db.delete_service_row(oid, svc_id)
+                        if parent_deleted:
+                            messagebox.showinfo("Deleted", f"Service deleted. Since it was the last service, Order {oid} has also been deleted.")
+                        else:
+                            messagebox.showinfo("Deleted", f"Service {target_svc['service_name']} has been deleted from Order {oid}.")
+                        edit_win.destroy()
+                        self.refresh_all()
+                    except Exception as e:
+                        messagebox.showerror('Error', str(e))
+
+        # Bottom Button Frame (Confirm, Delete, Cancel)
         btn_frame = tk.Frame(form, bg='white')
-        btn_frame.grid(row=6, column=0, columnspan=2, pady=12, sticky='ew')
-        btn_frame.columnconfigure((0,1), weight=1)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=15, sticky='ew')
+        btn_frame.columnconfigure((0, 1, 2), weight=1)
+        
         tk.Button(btn_frame, text='Confirm', command=save_changes, font=("Arial", 11, "bold"), bg="#3498db", fg="white", height=2, cursor="hand2").grid(row=0, column=0, sticky='ew', padx=5)
-        tk.Button(btn_frame, text='Cancel', command=edit_win.destroy, font=("Arial", 11), bg="#95a5a6", fg="white", height=2, cursor="hand2").grid(row=0, column=1, sticky='ew', padx=5)
+        tk.Button(btn_frame, text='Delete', command=delete_target, font=("Arial", 11, "bold"), bg="#e74c3c", fg="white", height=2, cursor="hand2").grid(row=0, column=1, sticky='ew', padx=5)
+        tk.Button(btn_frame, text='Cancel', command=edit_win.destroy, font=("Arial", 11), bg="#95a5a6", fg="white", height=2, cursor="hand2").grid(row=0, column=2, sticky='ew', padx=5)
 
 class ReportsPage(tk.Frame):
     def __init__(self, parent, controller):
