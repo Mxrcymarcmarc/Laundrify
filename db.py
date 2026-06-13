@@ -30,7 +30,7 @@ def init_db():
             Order_Ready_At TEXT NULL,
             Order_Released_At TEXT NULL,
             Order_Payed_At TEXT NULL,
-            Order_Notes TEXT NULL,
+            -- Order notes are now stored per-service in ORDER_DETAILS.Additional_Notes
             FOREIGN KEY (CustomerID) REFERENCES CUSTOMERS(CustomerID)
         )
         """,
@@ -85,6 +85,11 @@ def init_db():
             cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Service_Payed_At TEXT DEFAULT NULL")
         except Exception:
             pass
+        # Ensure ORDER_DETAILS has Additional_Notes column (migrated from ORDERS.Order_Notes)
+        try:
+            cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Additional_Notes TEXT NULL")
+        except Exception:
+            pass
         # Ensure SERVICES has Service_Unit column (kg or pcs)
         try:
             cursor.execute("ALTER TABLE SERVICES ADD COLUMN Service_Unit TEXT DEFAULT 'pcs'")
@@ -119,6 +124,21 @@ def init_db():
                 WHERE Service_Payed_At IS NULL AND EXISTS (SELECT 1 FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID AND ORDERS.Order_Payed_At IS NOT NULL)
             """)
             cconn.commit()
+            # If ORDERS still had Order_Notes, migrate them into ORDER_DETAILS.Additional_Notes
+            try:
+                cc.execute("""
+                    UPDATE ORDER_DETAILS
+                    SET Additional_Notes = (
+                        SELECT Order_Notes FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID
+                    )
+                    WHERE EXISTS (
+                        SELECT 1 FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID AND ORDERS.Order_Notes IS NOT NULL
+                    )
+                """)
+                cconn.commit()
+            except Exception:
+                # If ORDERS.Order_Notes doesn't exist or migration fails, ignore
+                pass
     except Exception:
         pass
 
@@ -651,11 +671,12 @@ def create_order(customer_id, total_price, items, notes=""):
         cursor = conn.cursor()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        # Insert parent order (notes are stored per-service in ORDER_DETAILS)
         cursor.execute(
             """INSERT INTO ORDERS (CustomerID, Order_Status, Order_Total_Price, 
-               Order_Received_At, Order_Notes) 
-               VALUES (?, ?, ?, ?, ?)""",
-            (customer_id, "Received", total_price, timestamp, notes)
+               Order_Received_At) 
+               VALUES (?, ?, ?, ?)""",
+            (customer_id, "Received", total_price, timestamp)
         )
         order_id = cursor.lastrowid
         
@@ -705,11 +726,21 @@ def create_order(customer_id, total_price, items, notes=""):
                             qty_value = 0
                             unit = 'pcs'
 
-            cursor.execute(
-                """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name) 
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''))
-            )
+            # Persist the service row and attach any per-item notes to the service line
+            per_item_notes = item.get('notes', '') if isinstance(item, dict) else ''
+            try:
+                cursor.execute(
+                    """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name, Additional_Notes) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''), per_item_notes)
+                )
+            except Exception:
+                # Fallback if Additional_Notes column doesn't exist yet
+                cursor.execute(
+                    """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name) 
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''))
+                )
         
         conn.commit()
         return order_id
@@ -820,7 +851,16 @@ def update_order(order_id, status=None, notes=None):
             if status == 'Released':
                 cursor.execute("UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ?", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
         if notes is not None:
-            cursor.execute("UPDATE ORDERS SET Order_Notes = ? WHERE OrderID = ?", (notes, order_id))
+            # Store/update notes on child service rows (per-service notes). Also attempt to update legacy ORDERS.Order_Notes if present.
+            try:
+                cursor.execute("UPDATE ORDER_DETAILS SET Additional_Notes = ? WHERE OrderID = ?", (notes, order_id))
+            except Exception:
+                pass
+            try:
+                cursor.execute("UPDATE ORDERS SET Order_Notes = ? WHERE OrderID = ?", (notes, order_id))
+            except Exception:
+                # legacy column may not exist; ignore
+                pass
         conn.commit()
         return True
 
@@ -1001,7 +1041,8 @@ def get_order_service_rows(order_id):
                       od.Item_Weight, IFNULL(od.Item_Unit, 'pcs') as Item_Unit,
                       IFNULL(od.Service_Name, '') as Service_Name,
                       IFNULL(od.Service_Status, 'Received') as Service_Status,
-                      od.Service_Payed_At
+                      od.Service_Payed_At,
+                      IFNULL(od.Additional_Notes, '') as Additional_Notes
                FROM ORDER_DETAILS od
                WHERE od.OrderID = ?
                ORDER BY od.OrderDetailID""",
@@ -1059,6 +1100,7 @@ def get_order_service_rows(order_id):
             'subtotal': float(subtotal),
             'status': row['Service_Status'] or 'Received',
             'paid': 'Yes' if row['Service_Payed_At'] else 'No',
+            'notes': row['Additional_Notes'] if 'Additional_Notes' in row.keys() else ''
         })
     return result
 

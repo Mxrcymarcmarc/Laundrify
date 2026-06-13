@@ -238,11 +238,16 @@ class NewOrderPage(tk.Frame):
 
         # order items table
         right.rowconfigure(2, weight=1)
-        columns = ("service", "quantity", "price")
+        columns = ("service", "quantity", "price", "notes")
         self.order_tree = ttk.Treeview(right, columns=columns, show="headings")
         for col in columns:
             self.order_tree.heading(col, text=col.capitalize())
-            self.order_tree.column(col, anchor="w")
+            # keep the notes column hidden from view
+            if col == 'notes':
+                self.order_tree.column(col, anchor="w", width=0, stretch=False)
+                self.order_tree.heading(col, text='')
+            else:
+                self.order_tree.column(col, anchor="w")
         self.order_tree.grid(row=2, column=0, sticky="nsew", pady=6)
 
         # buttons under the table
@@ -519,7 +524,14 @@ class NewOrderPage(tk.Frame):
                 messagebox.showerror("Configuration Error", "Unknown service type")
                 return
 
-        self.order_tree.insert("", "end", values=(service, quantity, f"₱ {price:.2f}"))
+        # capture current additional notes for this item and store it in hidden column
+        item_notes = self.notes_text.get("1.0", "end-1c").strip()
+        self.order_tree.insert("", "end", values=(service, quantity, f"₱ {price:.2f}", item_notes))
+        # clear notes box after adding the item so next item can have its own notes
+        try:
+            self.notes_text.delete('1.0', tk.END)
+        except Exception:
+            pass
         # lock customer fields once first item is added
         try:
             self.first_name_entry.config(state='disabled')
@@ -615,10 +627,13 @@ class NewOrderPage(tk.Frame):
                 price = float(price_str)
                 
                 total_price += price
+                # preserve per-item notes stored in hidden column (index 3)
+                item_note = values[3] if len(values) > 3 else ''
                 order_items.append({
                     'service': service,
                     'quantity': quantity_str,
-                    'subtotal': price
+                    'subtotal': price,
+                    'notes': item_note
                 })
             
             # Create order in database
@@ -1729,17 +1744,17 @@ class ViewOrderPage(tk.Frame):
             status.grid(row=4, column=1, sticky='ew')
             status.set(order['Order_Status'])
 
-            tk.Label(form, text="Notes:").grid(row=5, column=0, sticky='nw')
-            notes = tk.Text(form, height=6)
-            notes.grid(row=5, column=1, sticky='ew')
-            notes.insert('1.0', order.get('Order_Notes') or '')
+            # tk.Label(form, text="Notes:").grid(row=5, column=0, sticky='nw')
+            # notes = tk.Text(form, height=6)
+            # notes.grid(row=5, column=1, sticky='ew')
+            # notes.insert('1.0', order.get('Order_Notes') or '')
 
             def save_changes():
                 try:
                     first = first_name.get().strip()
                     last = last_name.get().strip()
                     db.update_customer(order['CustomerID'], first, last, ph.get().strip(), email.get().strip(), '')
-                    db.update_order(oid, status.get(), notes.get('1.0', 'end-1c').strip())
+                    # db.update_order(oid, status.get(), notes.get('1.0', 'end-1c').strip())
                     messagebox.showinfo('Saved', 'Order updated')
                     edit_win.destroy()
                     self.refresh_all()
@@ -1787,6 +1802,16 @@ class ViewOrderPage(tk.Frame):
             paid_combo = ttk.Combobox(form, values=["Yes", "No"], state='readonly')
             paid_combo.grid(row=4, column=1, sticky='ew', pady=8)
             paid_combo.set(target_svc['paid'])
+
+            # Read-only display for per-item notes
+            tk.Label(form, text="Notes:").grid(row=5, column=0, sticky='nw', pady=8)
+            notes_display = tk.Text(form, height=4, width=40, wrap='word', bg='white', relief='sunken')
+            notes_display.grid(row=5, column=1, sticky='ew', pady=8)
+            try:
+                notes_display.insert('1.0', target_svc.get('notes','') or '')
+                notes_display.config(state='disabled')
+            except Exception:
+                pass
 
             def save_changes():
                 try:
