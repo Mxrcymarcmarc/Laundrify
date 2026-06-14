@@ -3,7 +3,7 @@ from tkinter import ttk
 import tkinter.font as tkfont
 import re
 
-from db import get_received_report_data, get_revenue_report_data, get_ready_report_data, get_overdue_report_data, get_top_services_report_data, get_next_customer_id
+from db import get_received_report_data, get_revenue_report_data, get_ready_report_data, get_overdue_report_data, get_top_services_report_data, get_top_customers_by_orders, get_top_customers_by_revenue, get_next_customer_id
 
 PRIMARY = "#F0EDE5"
 SECONDARY = "#4A6FA5"
@@ -883,7 +883,6 @@ class ViewOrderPage(tk.Frame):
         button_frame = tk.Frame(top_frame, bg=PRIMARY)
         button_frame.grid(row=0, column=1, sticky="e", padx=5, pady=5)
 
-        tk.Button(button_frame, text="Update Status", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.open_update_status_window, width=15, height=1).pack(side="left", padx=5)
         tk.Button(button_frame, text="Process Payment", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.open_payment_window, width=15, height=1).pack(side="left", padx=5)
 
         # thin separator under heading (inside top_frame so filter_frame stays at previous row)
@@ -1314,8 +1313,8 @@ class ViewOrderPage(tk.Frame):
                 parent_vals.append('')
             tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(parent_vals), open=False, tags=('parent_mixed',))
 
-            for srow in svc_rows:
-                svc_iid = f"{oid}-{srow['service_id']}"
+            for idx, srow in enumerate(svc_rows):
+                svc_iid = f"{oid}-{srow['service_id']}-{idx}"
                 child_vals = [
                     '',  # Date Received blank
                     '',  # Customer blank
@@ -1544,171 +1543,7 @@ class ViewOrderPage(tk.Frame):
         except Exception as e:
             print(f"Error sorting orders: {e}")
 
-    def open_update_status_window(self):
-        import db
-        from tkinter import messagebox
 
-        status_win = tk.Toplevel(self)
-        status_win.title("Update Order Status")
-        status_win.geometry("500x350")
-        status_win.resizable(False, False)
-        status_win.grab_set()
-
-        container = tk.Frame(status_win, bd=2, relief="solid", bg="white")
-        container.pack(fill="both", expand=True, padx=10, pady=10)
-
-        header = tk.Frame(container, bg="#2c3e50", height=60)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-        tk.Label(header, text="Update Order Status", font=("Arial", 16, "bold"), bg="#2c3e50", fg="white").pack(pady=15)
-
-        form_frame = tk.Frame(container, bg="white")
-        form_frame.pack(fill="both", expand=True, padx=30, pady=30)
-        form_frame.columnconfigure(1, weight=1)
-
-        # Pre-populate and initialize if selected
-        selected_order_id = ""
-        tree = self.get_tree_for_current_tab()
-        if tree:
-            sel = tree.selection()
-            if sel:
-                selected_order_id = str(sel[0])
-
-        order_entry_var = tk.StringVar(value=selected_order_id)
-        order_entry = tk.Entry(form_frame, textvariable=order_entry_var, width=30, font=("Arial", 10))
-        order_entry.grid(row=0, column=1, sticky="ew", pady=15, padx=10)
-
-        # Order selection: use a freeform search entry (supports order ID or customer name search)
-        tk.Label(form_frame, text="Order ID / Customer:", font=("Arial", 11), bg="white").grid(row=0, column=0, sticky="w", pady=15)
-
-        def _choose_from_matches(matches):
-            # matches: list of (OrderID, display)
-            pick_win = tk.Toplevel(status_win)
-            pick_win.title('Select Order')
-            pick_win.geometry('400x300')
-            lb = tk.Listbox(pick_win)
-            for oid, disp in matches:
-                lb.insert('end', f"{oid} - {disp}")
-            lb.pack(fill='both', expand=True, padx=8, pady=8)
-            def _select():
-                sel = lb.curselection()
-                if not sel:
-                    return
-                text = lb.get(sel[0])
-                oid = text.split(' - ', 1)[0]
-                order_entry_var.set(oid)
-                try:
-                    o = db.get_order_details(int(oid))
-                    if o:
-                        status_combo.set(o['Order_Status'])
-                except:
-                    pass
-                pick_win.destroy()
-            btnf = tk.Button(pick_win, text='Select', command=_select)
-            btnf.pack(pady=6)
-
-        def _find_order():
-            q = order_entry_var.get().strip()
-            if not q:
-                messagebox.showwarning('Find Order', 'Enter Order ID or Customer name', parent=status_win)
-                return
-            
-            # Support child IDs like "5-3" by parsing the parent OrderID and ServiceID
-            if '-' in q:
-                try:
-                    parts = q.split('-')
-                    oid_clean = int(parts[0])
-                    svc_id = int(parts[1])
-                    svc_rows = db.get_order_service_rows(oid_clean)
-                    target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
-                    if target_svc:
-                        status_combo.set(target_svc['status'])
-                        o = db.get_order_details(oid_clean)
-                        messagebox.showinfo('Find Order', f"Found Service {svc_id} ({target_svc['service_name']}) for Order {oid_clean} ({o['First_Name']} {o['Last_Name']})\nCurrent Status: {target_svc['status']}", parent=status_win)
-                        return
-                except Exception:
-                    pass
-
-            # if numeric, try fetch by ID
-            if q.isdigit():
-                o = db.get_order_details(int(q))
-                if not o:
-                    messagebox.showinfo('Find Order', f'Order {q} not found', parent=status_win)
-                    return
-                # show brief info and update status combo
-                order_entry_var.set(str(o['OrderID']))
-                status_combo.set(o['Order_Status'])
-                messagebox.showinfo('Find Order', f"Found Order {o['OrderID']} for {o['First_Name']} {o['Last_Name']}\nCurrent Status: {o['Order_Status']}", parent=status_win)
-                return
-            # otherwise search by name (simple filter)
-            all_orders = db.get_orders()
-            qlow = q.lower()
-            matches = []
-            for o in all_orders:
-                name = f"{o['First_Name']} {o['Last_Name']}".lower()
-                if qlow in name:
-                    matches.append((o['OrderID'], f"{o['First_Name']} {o['Last_Name']} - {o['Order_Received_At']}"))
-            if not matches:
-                messagebox.showinfo('Find Order', 'No matching orders found', parent=status_win)
-                return
-            if len(matches) == 1:
-                order_entry_var.set(str(matches[0][0]))
-                o = db.get_order_details(int(matches[0][0]))
-                if o:
-                    status_combo.set(o['Order_Status'])
-                messagebox.showinfo('Find Order', f"Found Order {matches[0][0]} for {matches[0][1]}", parent=status_win)
-                return
-            # multiple matches - let user pick
-            _choose_from_matches(matches)
-
-        tk.Button(form_frame, text='Find', command=_find_order).grid(row=0, column=2, padx=6)
-
-        tk.Label(form_frame, text="New Status:", font=("Arial", 11), bg="white").grid(row=1, column=0, sticky="w", pady=15)
-        status_combo = ttk.Combobox(form_frame, values=["Received", "In-Progress", "Ready", "Released"], width=30, state="readonly", font=("Arial", 10))
-        status_combo.grid(row=1, column=1, sticky="ew", pady=15, padx=10)
-
-        # Initialize status if pre-populated
-        if selected_order_id:
-            try:
-                oid_clean = selected_order_id.split('-')[0]
-                if '-' in selected_order_id:
-                    svc_id = int(selected_order_id.split('-')[1])
-                    svc_rows = db.get_order_service_rows(int(oid_clean))
-                    target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
-                    if target_svc:
-                        status_combo.set(target_svc['status'])
-                else:
-                    o = db.get_order_details(int(oid_clean))
-                    if o:
-                        status_combo.set(o['Order_Status'])
-            except Exception:
-                pass
-
-        def update_and_close():
-            order_id = order_entry_var.get().strip()
-            new_status = status_combo.get()
-            if not order_id or not new_status:
-                messagebox.showwarning("Error", "Please select an order and status", parent=status_win)
-                return
-            try:
-                if '-' in order_id:
-                    oid_clean = order_id.split('-')[0]
-                    svc_id = int(order_id.split('-')[1])
-                    db.update_service_status(int(oid_clean), svc_id, new_status)
-                    messagebox.showinfo("Success", f"Service {order_id} status updated to {new_status}", parent=status_win)
-                else:
-                    db.update_order_status(int(order_id), new_status)
-                    messagebox.showinfo("Success", f"Order {order_id} status updated to {new_status}", parent=status_win)
-                self.refresh_all()
-                status_win.destroy()
-            except Exception as e:
-                messagebox.showerror("Error", f"Database error: {str(e)}", parent=status_win)
-
-        btn_frame = tk.Frame(container, bg="white")
-        btn_frame.pack(fill="x", padx=30, pady=20)
-        btn_frame.columnconfigure((0, 1), weight=1)
-        tk.Button(btn_frame, text="Update Status", command=update_and_close, font=("Arial", 11, "bold"), bg="#27ae60", fg="white", height=2, cursor="hand2").grid(row=0, column=0, sticky="ew", padx=5)
-        tk.Button(btn_frame, text="Cancel", command=status_win.destroy, font=("Arial", 11), bg="#95a5a6", fg="white", height=2, cursor="hand2").grid(row=0, column=1, sticky="ew", padx=5)
 
     def open_payment_window(self):
         import db
@@ -2377,7 +2212,7 @@ class ReportsPage(tk.Frame):
         # Tab buttons
         tab_frame = tk.Frame(self, bd=1, relief="solid")
         tab_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
-        tab_frame.columnconfigure((0,1,2,3,4), weight=1)
+        tab_frame.columnconfigure((0,1,2,3,4,5), weight=1)
         
         self.current_tab = "revenue"
         tabs = {
@@ -2385,7 +2220,8 @@ class ReportsPage(tk.Frame):
             "received": "Received Today",
             "ready": "Ready Today",
             "overdue": "Overdue",
-            "services": "Top Services"
+            "services": "Top Services",
+            "customers": "Top Customers"
         }
         self.tab_buttons = {}
         for key, label in tabs.items():
@@ -2404,76 +2240,236 @@ class ReportsPage(tk.Frame):
     
     def show_report(self, report_type):
         # Clear previous chart
-        if self.canvas:
-            self.canvas.get_tk_widget().destroy()
+        for widget in self.chart_frame.winfo_children():
+            widget.destroy()
+        self.canvas = None
+        
+        # Default configuration: KPI/Title in row 0 (no expand), Content in row 1 (expand)
+        self.chart_frame.rowconfigure(0, weight=0)
+        self.chart_frame.rowconfigure(1, weight=1)
         
         self.current_tab = report_type
         
-        # Create matplotlib figure
+        if report_type == "customers":
+            self.chart_frame.rowconfigure(0, weight=1)
+            self.chart_frame.rowconfigure(1, weight=0)
+            data_orders = get_top_customers_by_orders()
+            data_revenue = get_top_customers_by_revenue()
+            
+            # Main container for the sub-tab area
+            customers_container = tk.Frame(self.chart_frame, bg="white")
+            customers_container.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+            customers_container.rowconfigure(1, weight=1)
+            customers_container.columnconfigure(0, weight=1)
+            
+            # Sub-tabs frame (the grey bar)
+            subtab_frame = tk.Frame(customers_container, bg="#f0f0f0")
+            subtab_frame.grid(row=0, column=0, sticky="ew")
+            
+            # Treeview container
+            tree_container = tk.Frame(customers_container, bg="white", highlightbackground="#cccccc", highlightthickness=1)
+            tree_container.grid(row=1, column=0, sticky="nsew")
+            tree_container.columnconfigure(0, weight=1)
+            tree_container.rowconfigure(0, weight=1)
+            
+            # Style setup
+            style = ttk.Style()
+            style.configure("Fun.Treeview", 
+                            background="#ffffff",
+                            foreground="#2c3e50",
+                            rowheight=35,
+                            fieldbackground="#ffffff",
+                            font=("Arial", 11),
+                            borderwidth=0)
+            style.configure("Fun.Treeview.Heading", 
+                            font=("Arial", 11, "bold"), 
+                            foreground="#4A6FA5",
+                            borderwidth=1,
+                            relief="flat")
+            style.map("Fun.Treeview", background=[('selected', ACCENT)], foreground=[('selected', 'black')])
+            
+            def build_tree(parent, data):
+                columns = ("rank", "name", "orders", "revenue")
+                tree = ttk.Treeview(parent, columns=columns, show="headings", height=10, style="Fun.Treeview")
+                tree.heading("rank", text="Rank")
+                tree.heading("name", text="Customer Name")
+                tree.heading("orders", text="Total Orders")
+                tree.heading("revenue", text="Total Revenue")
+                
+                tree.column("rank", width=80, anchor="center")
+                tree.column("name", width=250, anchor="w")
+                tree.column("orders", width=120, anchor="center")
+                tree.column("revenue", width=150, anchor="e")
+                
+                tree.tag_configure("evenrow", background="#f8f9fa")
+                tree.tag_configure("oddrow", background="#ffffff")
+                tree.tag_configure("top1", background="#ffeaa7", font=("Arial", 11, "bold")) 
+                tree.tag_configure("top2", background="#dfe6e9", font=("Arial", 11, "bold")) 
+                tree.tag_configure("top3", background="#fab1a0", font=("Arial", 11, "bold")) 
+                
+                for i, row in enumerate(data):
+                    if i == 0:
+                        rank_str, tag = "1st", "top1"
+                    elif i == 1:
+                        rank_str, tag = "2nd", "top2"
+                    elif i == 2:
+                        rank_str, tag = "3rd", "top3"
+                    else:
+                        rank_str, tag = f"#{i+1}", ("evenrow" if i % 2 == 0 else "oddrow")
+                        
+                    tree.insert("", "end", values=(rank_str, row[0], row[1], f"₱ {row[2]:,.2f}"), tags=(tag,))
+                return tree
+
+            tree_orders = build_tree(tree_container, data_orders)
+            tree_revenue = build_tree(tree_container, data_revenue)
+            
+            # Toggling logic
+            def show_subtab(tab_name):
+                btn_freq.config(bg="white" if tab_name == "freq" else "#f0f0f0", fg=SECONDARY if tab_name == "freq" else "black", font=("Arial", 12, "bold"))
+                btn_spend.config(bg="white" if tab_name == "spend" else "#f0f0f0", fg=SECONDARY if tab_name == "spend" else "black", font=("Arial", 12, "bold"))
+                
+                if tab_name == "freq":
+                    tree_revenue.grid_forget()
+                    tree_orders.grid(row=0, column=0, sticky="nsew")
+                else:
+                    tree_orders.grid_forget()
+                    tree_revenue.grid(row=0, column=0, sticky="nsew")
+
+            btn_freq = tk.Button(subtab_frame, text="Most Frequent", relief="flat", bd=0, padx=20, pady=10, fg="black", command=lambda: show_subtab("freq"))
+            btn_freq.pack(side="left")
+            
+            btn_spend = tk.Button(subtab_frame, text="Top Spenders", relief="flat", bd=0, padx=20, pady=10, fg="black", command=lambda: show_subtab("spend"))
+            btn_spend.pack(side="left")
+            
+            # Default
+            show_subtab("freq")
+            
+            return
+        
+        # Setup Top KPI Frame
+        kpi_frame = tk.Frame(self.chart_frame, bg="white")
+        
+        if report_type == "services":
+            from db import get_top_services_report_data
+            services, count = get_top_services_report_data()
+            total_services = sum(count) if count else 0
+            
+            kpi_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+            card = tk.Frame(kpi_frame, bg="#f9e7f9", bd=1, relief="solid", highlightbackground="#9b59b6", highlightthickness=1)
+            card.pack(fill="x", pady=5, padx=20)
+            tk.Label(card, text="Total Services Rendered", font=("Arial", 10, "bold"), bg="#f9e7f9", fg="#8e44ad").pack(pady=(10, 0))
+            tk.Label(card, text=f"{total_services} Services", font=("Arial", 18, "bold"), bg="#f9e7f9", fg="#8e44ad").pack(pady=(0, 10))
+            
+        elif report_type == "overdue":
+            from db import get_overdue_report_data
+            services, overdue_count = get_overdue_report_data()
+            total_overdue = sum(overdue_count) if overdue_count else 0
+            
+            if total_overdue == 0:
+                msg = tk.Label(self.chart_frame, text="0 Overdue!\nAll caught up.", font=("Arial", 32, "bold"), bg="white", fg="#2ed573")
+                msg.grid(row=0, column=0, sticky="nsew", pady=100)
+                return
+                
+            kpi_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+            kpi_card = tk.Frame(kpi_frame, bg="#fff0f0", bd=1, relief="solid", highlightbackground="#ffcccc", highlightthickness=1)
+            kpi_card.pack(fill="x", pady=5, padx=20)
+            tk.Label(kpi_card, text="URGENT ACTION CENTER", font=("Arial", 10, "bold"), bg="#fff0f0", fg="#e74c3c").pack(pady=(10, 0))
+            tk.Label(kpi_card, text=f"{total_overdue} Orders Overdue", font=("Arial", 16, "bold"), bg="#fff0f0", fg="#c0392b").pack(pady=(0, 10))
+        
+        elif report_type == "revenue":
+            from db import get_revenue_report_data
+            days, revenue = get_revenue_report_data()
+            total_rev = sum(revenue) if revenue else 0
+            peak_rev = max(revenue) if revenue else 0
+            
+            kpi_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+            kpi_frame.columnconfigure((0, 1), weight=1)
+            
+            card1 = tk.Frame(kpi_frame, bg="#f0f8ff", bd=1, relief="solid", highlightbackground="#cce4ff", highlightthickness=1)
+            card1.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+            tk.Label(card1, text="Total Daily Revenue", font=("Arial", 10, "bold"), bg="#f0f8ff", fg="#3498db").pack(pady=(10, 0))
+            tk.Label(card1, text=f"${total_rev}", font=("Arial", 18, "bold"), bg="#f0f8ff", fg="#2980b9").pack(pady=(0, 10))
+            
+            card2 = tk.Frame(kpi_frame, bg="#f0f8ff", bd=1, relief="solid", highlightbackground="#cce4ff", highlightthickness=1)
+            card2.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
+            tk.Label(card2, text="Peak Hour Revenue", font=("Arial", 10, "bold"), bg="#f0f8ff", fg="#3498db").pack(pady=(10, 0))
+            tk.Label(card2, text=f"${peak_rev}", font=("Arial", 18, "bold"), bg="#f0f8ff", fg="#2980b9").pack(pady=(0, 10))
+            
+        elif report_type in ["received", "ready"]:
+            kpi_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+            if report_type == "received":
+                from db import get_received_report_data
+                hours, data = get_received_report_data()
+                title, color, bg_color, fg_color = "Total Received", "#e67e22", "#fff3e8", "#d35400"
+            else:
+                from db import get_ready_report_data
+                hours, data = get_ready_report_data()
+                title, color, bg_color, fg_color = "Total Ready", "#2ecc71", "#e8f8f0", "#27ae60"
+                
+            total_orders = sum(data) if data else 0
+            
+            card = tk.Frame(kpi_frame, bg=bg_color, bd=1, relief="solid", highlightbackground=color, highlightthickness=1)
+            card.pack(fill="x", pady=5, padx=20)
+            tk.Label(card, text=title, font=("Arial", 10, "bold"), bg=bg_color, fg=fg_color).pack(pady=(10, 0))
+            tk.Label(card, text=f"{total_orders} Orders", font=("Arial", 18, "bold"), bg=bg_color, fg=fg_color).pack(pady=(0, 10))
+
+        # Create matplotlib figure for remaining reports
         import matplotlib.pyplot as plt
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        from matplotlib.ticker import MaxNLocator
         
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = plt.subplots(figsize=(10, 4))
         
         if report_type == "revenue":
-            # Revenue Today - Line chart
-            days, revenue = get_revenue_report_data()
-            
-            ax.plot(days, revenue, marker='o', linewidth=2, markersize=8, color='#2ecc71')
-            ax.fill_between(range(len(days)), revenue, alpha=0.3, color='#2ecc71')
-            ax.set_title("Revenue Today", fontsize=14, fontweight='bold')
+            ax.plot(days, revenue, marker='o', linewidth=2, markersize=8, color='#3498db')
+            ax.fill_between(range(len(days)), revenue, alpha=0.3, color='#3498db')
+            ax.set_title("Revenue Trend", fontsize=14, fontweight='bold')
             ax.set_ylabel("Amount ($)")
             ax.grid(True, alpha=0.3)
-        
-        elif report_type == "received":
-            # Received Today - Bar chart
-            hours, received = get_received_report_data()
-            ax.bar(hours, received, color='#3498db', alpha=0.7)
-            ax.set_title("Received Today", fontsize=14, fontweight='bold')
-            ax.set_ylabel("Orders")
-            ax.grid(True, alpha=0.3, axis='y')
-        
-        elif report_type == "ready":
-            # Ready Today - Bar chart
-            hours, ready = get_ready_report_data()  
-            ax.bar(hours, ready, color='#f39c12', alpha=0.7)
-            ax.set_title("Ready Today", fontsize=14, fontweight='bold')
-            ax.set_ylabel("Orders")
-            ax.grid(True, alpha=0.3, axis='y')
-        
-        elif report_type == "overdue":
-            services, overdue_count = get_overdue_report_data()
             
-            if not services:
-                ax.text(0.5, 0.5, "All caught up!\nNo overdue orders.", 
-                        horizontalalignment='center', verticalalignment='center', 
-                        fontsize=12, fontweight='bold', color='#2ed573')
-                ax.set_title("Overdue Orders by Service", fontsize=14, fontweight='bold')
-                ax.axis('off')
-            else:
-                ax.pie(overdue_count, labels=services, autopct='%1.1f%%', startangle=90,
-                    colors=['#e74c3c', '#e67e22', '#f1c40f', '#3498db'])
-                ax.set_title("Overdue Orders by Service", fontsize=14, fontweight='bold')
-
+            if revenue and max(revenue) > 0:
+                peak_idx = revenue.index(max(revenue))
+                ax.annotate(f"Peak: ${max(revenue)}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=0.8, ec='none'))
+                
+        elif report_type == "received":
+            bars = ax.bar(hours, data, color='#e67e22', alpha=0.8)
+            ax.bar_label(bars, fmt='%d', padding=3, color='#2c3e50', fontweight='bold')
+            ax.set_title("Received Flow", fontsize=14, fontweight='bold')
+            ax.set_ylabel("Orders")
+            ax.grid(True, alpha=0.3, axis='y')
+            
+        elif report_type == "ready":
+            bars = ax.bar(hours, data, color='#2ecc71', alpha=0.8)
+            ax.bar_label(bars, fmt='%d', padding=3, color='#2c3e50', fontweight='bold')
+            ax.set_title("Ready Flow", fontsize=14, fontweight='bold')
+            ax.set_ylabel("Orders")
+            ax.grid(True, alpha=0.3, axis='y')
+            
+        elif report_type == "overdue":
+            wedges, texts, autotexts = ax.pie(overdue_count, labels=services, autopct='%1.1f%%', startangle=90, colors=['#e74c3c', '#e67e22', '#f1c40f', '#3498db'], wedgeprops=dict(width=0.4, edgecolor='w', linewidth=2))
+            plt.setp(autotexts, size=10, weight="bold", color="white")
+            ax.text(0, 0, f"{total_overdue}", ha='center', va='center', fontsize=28, fontweight='bold', color='#e74c3c')
+            ax.text(0, -0.2, "OVERDUE", ha='center', va='center', fontsize=10, fontweight='bold', color='#7f8c8d')
+            ax.set_title("Overdue Distribution", fontsize=14, fontweight='bold')
+            
         elif report_type == "services":
-            services, count = get_top_services_report_data()
-    
             if not services:
                 ax.text(0.5, 0.5, "No orders recorded yet to calculate top services.", 
                         horizontalalignment='center', verticalalignment='center', fontsize=12)
                 ax.set_title("Top Services", fontsize=14, fontweight='bold')
                 ax.axis('off')
             else:
-                ax.barh(services, count, color='#e74c3c', alpha=0.7, height=0.5)
+                bars = ax.barh(services, count, color='#9b59b6', alpha=0.8)
+                ax.bar_label(bars, fmt='%d', padding=3, color='#2c3e50', fontweight='bold')
                 ax.set_title("Top Services", fontsize=14, fontweight='bold')
                 ax.set_xlabel("Orders")
-                ax.grid(True, alpha=0.3, axis='x') 
-        
+                ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+                ax.grid(True, alpha=0.3, axis='x')
+
         fig.tight_layout()
         
-        # Embed in tkinter
         self.canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
-        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
 
 
 

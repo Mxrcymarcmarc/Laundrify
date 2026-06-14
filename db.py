@@ -535,46 +535,7 @@ def get_or_create_combined_service(component_service_ids):
         return cur.lastrowid
 
 
-def update_order_status(order_id, new_status):
-    """Update order status with business rule validation
-    
-    Statuses allowed: Received, In-Progress, Ready, Released
-    Rule: Cannot mark as Released if order has not been paid
-    """
-    from datetime import datetime
-    
-    if new_status == "Released" and not is_order_paid(order_id):
-        raise ValueError("Cannot mark order as Released. Order must be paid first.")
-    
-    with sqlite3.connect("Laundrify.db") as conn:
-        cursor = conn.cursor()
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        cursor.execute(
-            "UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?",
-            (new_status, order_id)
-        )
-        
-        # Cascade to all child services
-        cursor.execute(
-            "UPDATE ORDER_DETAILS SET Service_Status = ? WHERE OrderID = ?",
-            (new_status, order_id)
-        )
-        
-        if new_status == "Ready":
-            cursor.execute(
-                "UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ?",
-                (timestamp, order_id)
-            )
-        
-        if new_status == "Released":
-            cursor.execute(
-                "UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ?",
-                (timestamp, order_id)
-            )
-        
-        conn.commit()
-        return True
+
 
 def process_payment(order_id, amount_paid):
     """Process payment for an order
@@ -1087,6 +1048,42 @@ def get_top_services_report_data():
     
     return services, counts
 
+def get_top_customers_by_orders():
+    query = """
+        SELECT 
+            C.First_Name || ' ' || C.Last_Name as customer_name,
+            COUNT(O.OrderID) as total_orders,
+            SUM(O.Order_Total_Price) as total_spent
+        FROM ORDERS O
+        JOIN CUSTOMERS C ON O.CustomerID = C.CustomerID
+        GROUP BY C.CustomerID
+        ORDER BY total_orders DESC, total_spent DESC
+        LIMIT 10
+    """
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        return cursor.fetchall()
+
+def get_top_customers_by_revenue():
+    query = """
+        SELECT 
+            C.First_Name || ' ' || C.Last_Name as customer_name,
+            COUNT(O.OrderID) as total_orders,
+            SUM(O.Order_Total_Price) as total_spent
+        FROM ORDERS O
+        JOIN CUSTOMERS C ON O.CustomerID = C.CustomerID
+        GROUP BY C.CustomerID
+        ORDER BY total_spent DESC, total_orders DESC
+        LIMIT 10
+    """
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        return cursor.fetchall()
+
 def get_order_service_rows(order_id):
     """Return a list of service-line dicts for the given order.
 
@@ -1180,47 +1177,6 @@ def is_service_paid(order_id, service_id):
         return res and res[0] is not None
 
 
-def update_service_status(order_id, service_id, new_status):
-    from datetime import datetime
-    
-    # Cannot mark service as Released if it has not been paid
-    if new_status == "Released" and not is_service_paid(order_id, service_id):
-        raise ValueError("Cannot mark service as Released. This service must be paid first.")
-
-    with sqlite3.connect("Laundrify.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE ORDER_DETAILS SET Service_Status = ? WHERE OrderID = ? AND ServiceID = ?", (new_status, order_id, service_id))
-        
-        # Recalculate parent order status
-        cursor.execute("SELECT IFNULL(Service_Status, 'Received') FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
-        statuses = [r[0] for r in cursor.fetchall()]
-        
-        if all(s == 'Released' for s in statuses):
-            agg_status = 'Released'
-        elif all(s in ('Ready', 'Released') for s in statuses):
-            agg_status = 'Ready'
-        elif any(s in ('In-Progress', 'Ready', 'Released') for s in statuses):
-            agg_status = 'In-Progress'
-        else:
-            agg_status = 'Received'
-            
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute("UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?", (agg_status, order_id))
-        
-        if agg_status == "Ready":
-            cursor.execute("SELECT Order_Ready_At FROM ORDERS WHERE OrderID = ?", (order_id,))
-            o_ready = cursor.fetchone()
-            if not o_ready or not o_ready[0]:
-                cursor.execute("UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ?", (timestamp, order_id))
-                
-        if agg_status == "Released":
-            cursor.execute("SELECT Order_Released_At FROM ORDERS WHERE OrderID = ?", (order_id,))
-            o_released = cursor.fetchone()
-            if not o_released or not o_released[0]:
-                cursor.execute("UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ?", (timestamp, order_id))
-                
-        conn.commit()
-        return True
 
 
 def process_service_payment(order_id, service_id, amount_paid):

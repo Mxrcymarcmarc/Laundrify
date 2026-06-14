@@ -38,7 +38,7 @@ def main():
 
     root.rowconfigure(0, weight=0)
     root.rowconfigure(1, weight=0)
-    root.rowconfigure(2, weight=0)
+    root.rowconfigure(2, weight=1)
     def set_title(t):
         label_header.config(text=t)
 
