@@ -635,6 +635,30 @@ def process_payment(order_id, amount_paid):
             'message': 'Payment processed successfully'
         }
 
+def get_next_customer_id():
+    """Return the lowest unused CustomerID, filling any gaps left by deletions."""
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT CustomerID FROM CUSTOMERS ORDER BY CustomerID")
+        existing = {row[0] for row in cursor.fetchall()}
+    candidate = 1
+    while candidate in existing:
+        candidate += 1
+    return candidate
+
+
+def get_next_order_id():
+    """Return the lowest unused OrderID, filling any gaps left by deletions."""
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT OrderID FROM ORDERS ORDER BY OrderID")
+        existing = {row[0] for row in cursor.fetchall()}
+    candidate = 1
+    while candidate in existing:
+        candidate += 1
+    return candidate
+
+
 def create_or_get_customer(first_name, last_name, phone_number, email="", address=""):
     """Create or find an existing customer.
 
@@ -666,13 +690,14 @@ def create_or_get_customer(first_name, last_name, phone_number, email="", addres
             if res:
                 return res[0]
 
-        # create new customer record
+        # create new customer record, reusing the lowest available CustomerID
+        new_id = get_next_customer_id()
         cursor.execute(
-            "INSERT INTO CUSTOMERS (First_Name, Last_Name, Phone_Number, Email, Address) VALUES (?, ?, ?, ?, ?)",
-            (first_name, last_name, phone, email, address)
+            "INSERT INTO CUSTOMERS (CustomerID, First_Name, Last_Name, Phone_Number, Email, Address) VALUES (?, ?, ?, ?, ?, ?)",
+            (new_id, first_name, last_name, phone, email, address)
         )
         conn.commit()
-        return cursor.lastrowid
+        return new_id
 
 def create_order(customer_id, total_price, items, notes=""):
     """Create a new order with items
@@ -687,14 +712,15 @@ def create_order(customer_id, total_price, items, notes=""):
         cursor = conn.cursor()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Insert parent order (notes are stored per-service in ORDER_DETAILS)
+        # Insert parent order, reusing the lowest available OrderID (gap-filling)
+        new_order_id = get_next_order_id()
         cursor.execute(
-            """INSERT INTO ORDERS (CustomerID, Order_Status, Order_Total_Price, 
+            """INSERT INTO ORDERS (OrderID, CustomerID, Order_Status, Order_Total_Price, 
                Order_Received_At) 
-               VALUES (?, ?, ?, ?)""",
-            (customer_id, "Received", total_price, timestamp)
+               VALUES (?, ?, ?, ?, ?)""",
+            (new_order_id, customer_id, "Received", total_price, timestamp)
         )
-        order_id = cursor.lastrowid
+        order_id = new_order_id
         
         for item in items:
             cursor.execute("SELECT ServiceID FROM SERVICES WHERE Service_Type = ?", (item['service'],))
@@ -1276,9 +1302,20 @@ def get_next_customer_id():
 def delete_order(order_id):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT CustomerID FROM ORDERS WHERE OrderID = ?", (order_id,))
+        row = cursor.fetchone()
+        customer_id = row[0] if row else None
+
         cursor.execute("DELETE FROM ORDERS WHERE OrderID = ?", (order_id,))
         cursor.execute("DELETE FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
         cursor.execute("DELETE FROM PAYMENTS WHERE OrderID = ?", (order_id,))
+
+        if customer_id:
+            cursor.execute("SELECT COUNT(*) FROM ORDERS WHERE CustomerID = ?", (customer_id,))
+            orders_left = cursor.fetchone()[0]
+            if orders_left == 0:
+                cursor.execute("DELETE FROM CUSTOMERS WHERE CustomerID = ?", (customer_id,))
+
         conn.commit()
         return True
 
@@ -1286,6 +1323,10 @@ def delete_order(order_id):
 def delete_service_row(order_id, service_id):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT CustomerID FROM ORDERS WHERE OrderID = ?", (order_id,))
+        row = cursor.fetchone()
+        customer_id = row[0] if row else None
+
         cursor.execute("DELETE FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
         
         # Check if any services remain for this order
@@ -1296,6 +1337,13 @@ def delete_service_row(order_id, service_id):
             # Delete order entirely
             cursor.execute("DELETE FROM ORDERS WHERE OrderID = ?", (order_id,))
             cursor.execute("DELETE FROM PAYMENTS WHERE OrderID = ?", (order_id,))
+
+            if customer_id:
+                cursor.execute("SELECT COUNT(*) FROM ORDERS WHERE CustomerID = ?", (customer_id,))
+                orders_left = cursor.fetchone()[0]
+                if orders_left == 0:
+                    cursor.execute("DELETE FROM CUSTOMERS WHERE CustomerID = ?", (customer_id,))
+
             conn.commit()
             return True, True  # success, parent order deleted
             
@@ -1333,7 +1381,7 @@ def delete_service_row(order_id, service_id):
         return True, False  # success, parent order NOT deleted
 
 
-def update_service_details(order_id, service_id, weight, subtotal, status, paid_val):
+def update_service_details(order_id, service_id, weight, subtotal, status, paid_val, notes=""):
     from datetime import datetime
     import re
     
@@ -1381,9 +1429,9 @@ def update_service_details(order_id, service_id, weight, subtotal, status, paid_
             
         cursor.execute("""
             UPDATE ORDER_DETAILS
-            SET Item_Weight = ?, Item_Unit = ?, Order_Subtotal = ?, Service_Status = ?, Service_Payed_At = ?
+            SET Item_Weight = ?, Item_Unit = ?, Order_Subtotal = ?, Service_Status = ?, Service_Payed_At = ?, Additional_Notes = ?
             WHERE OrderID = ? AND ServiceID = ?
-        """, (qty_value, unit, subtotal, status, paid_at, order_id, service_id))
+        """, (qty_value, unit, subtotal, status, paid_at, notes, order_id, service_id))
         
         # Recalculate parent order price
         cursor.execute("SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))

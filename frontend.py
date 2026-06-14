@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
+import re
 
 from db import get_received_report_data, get_revenue_report_data, get_ready_report_data, get_overdue_report_data, get_top_services_report_data, get_next_customer_id
 
@@ -129,10 +130,15 @@ class App(tk.Frame):
         
         # update outer header if provided
         self.title_callback(titles.get(name, "Laundrify"))
-        # auto-refresh view page when shown
+        # auto-refresh view/customers page when shown
         try:
             if name == 'ViewOrderPage':
                 self.pages[name].refresh_all()
+            elif name == 'CustomersPage':
+                self.pages[name].refresh_customers()
+            elif name == 'NewOrderPage':
+                if not self.pages[name].first_name_entry.get().strip() and not self.pages[name].last_name_entry.get().strip():
+                    self.pages[name].update_customer_number()
         except Exception:
             pass
         self.pages[name].tkraise()
@@ -162,18 +168,19 @@ class NewOrderPage(tk.Frame):
         for i in range(2, 10):
             left.rowconfigure(i, pad=5)
 
-        cust_num = get_next_customer_id()
-        tk.Label(left, text=f"Customer Number: {cust_num}", font=HDR2_TEXT, bg=PRIMARY).grid(row=0, column=0, columnspan=2, sticky="w")
+        self.cust_num = get_next_customer_id()
+        self.customer_number_label = tk.Label(left, text=f"Customer Number: {self.cust_num}", font=HDR2_TEXT, bg=PRIMARY)
+        self.customer_number_label.grid(row=0, column=0, columnspan=2, sticky="w")
         
-        tk.Label(left, text="First Name:", font=TTL_TEXT, bg=PRIMARY).grid(row=1, column=0, sticky="w")
+        tk.Label(left, text="First Name* :", font=TTL_TEXT, bg=PRIMARY).grid(row=1, column=0, sticky="w")
         self.first_name_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
         self.first_name_entry.grid(row=1, column=1, sticky="ew", ipady=3)
 
-        tk.Label(left, text="Last Name:", font=TTL_TEXT, bg=PRIMARY).grid(row=2, column=0, sticky="w")
+        tk.Label(left, text="Last Name* :", font=TTL_TEXT, bg=PRIMARY).grid(row=2, column=0, sticky="w")
         self.last_name_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
         self.last_name_entry.grid(row=2, column=1, sticky="ew", ipady=3)
 
-        tk.Label(left, text="Address:", font=TTL_TEXT, bg=PRIMARY).grid(row=3, column=0, sticky="w")
+        tk.Label(left, text="Address* :", font=TTL_TEXT, bg=PRIMARY).grid(row=3, column=0, sticky="w")
         self.address_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
         self.address_entry.grid(row=3, column=1, sticky="ew", ipady=3)
 
@@ -181,7 +188,7 @@ class NewOrderPage(tk.Frame):
         self.email_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
         self.email_entry.grid(row=4, column=1, sticky="ew", ipady=3)
 
-        tk.Label(left, text="Phone:", font=TTL_TEXT, bg=PRIMARY).grid(row=5, column=0, sticky="w")
+        tk.Label(left, text="Phone* :", font=TTL_TEXT, bg=PRIMARY).grid(row=5, column=0, sticky="w")
         self.phone_entry = tk.Entry(left, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
         self.phone_entry.grid(row=5, column=1, sticky="ew", ipady=3)
         # Register phone validation - only numbers
@@ -289,6 +296,7 @@ class NewOrderPage(tk.Frame):
                         self.address_entry.delete(0, tk.END); self.address_entry.insert(0, rec.get('Address','') or '')
                         self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rec.get('Email','') or '')
                         self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rec.get('Phone_Number','') or '')
+                        self.update_customer_number(rec.get('CustomerID'))
                         messagebox.showinfo('Found', f"Loaded customer {rec.get('First_Name','')} {rec.get('Last_Name','')}")
                         return
             except Exception:
@@ -312,6 +320,15 @@ class NewOrderPage(tk.Frame):
         entry_last = tk.Entry(top, font=REG_TEXT)
         entry_last.grid(row=0, column=3, sticky='ew')
         tk.Button(top, text='Search', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=lambda: populate_filtered()).grid(row=0, column=4, padx=8)
+
+        def check_lookup_empty(event):
+            if not entry_first.get().strip() and not entry_last.get().strip():
+                populate()
+            elif not event.widget.get().strip():
+                populate_filtered()
+
+        entry_first.bind('<KeyRelease>', check_lookup_empty)
+        entry_last.bind('<KeyRelease>', check_lookup_empty)
 
         # container for tree
         container = tk.Frame(sel_win, padx=8, pady=6)
@@ -350,8 +367,9 @@ class NewOrderPage(tk.Frame):
                 allc = []
             res = []
             for c in allc:
-                fn = (c.get('First_Name','') or '').lower()
-                ln = (c.get('Last_Name','') or '').lower()
+                cc = dict(c)
+                fn = (cc.get('First_Name','') or '').lower()
+                ln = (cc.get('Last_Name','') or '').lower()
                 if f and f not in fn: continue
                 if l and l not in ln: continue
                 res.append(c)
@@ -370,6 +388,7 @@ class NewOrderPage(tk.Frame):
                 self.address_entry.delete(0, tk.END); self.address_entry.insert(0, rd.get('Address','') or '')
                 self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rd.get('Email','') or '')
                 self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rd.get('Phone_Number','') or '')
+                self.update_customer_number(rd.get('CustomerID'))
             sel_win.destroy()
 
         tree.bind('<Double-1>', _on_double)
@@ -387,6 +406,7 @@ class NewOrderPage(tk.Frame):
                 self.address_entry.delete(0, tk.END); self.address_entry.insert(0, rd.get('Address','') or '')
                 self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rd.get('Email','') or '')
                 self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rd.get('Phone_Number','') or '')
+                self.update_customer_number(rd.get('CustomerID'))
             sel_win.destroy()
 
         btnf = tk.Frame(sel_win)
@@ -413,6 +433,8 @@ class NewOrderPage(tk.Frame):
             # Show weight entry field
             tk.Label(self.dynamic_frame, text="Weight (kg):", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w")
             self.weight_var = tk.Entry(self.dynamic_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+            vcmd_weight = self.dynamic_frame.register(self.validate_weight)
+            self.weight_var.config(validate='key', validatecommand=(vcmd_weight, '%P'))
             self.weight_var.grid(row=0, column=1, sticky="ew", ipady=3)
             self.size_var = None
             self.qty_var = None
@@ -474,6 +496,47 @@ class NewOrderPage(tk.Frame):
         if value == "":
             return True
         return value.isdigit()
+
+    def validate_weight(self, value):
+        """Allow only numeric characters (digits) for weight"""
+        if value == "":
+            return True
+        return value.isdigit()
+
+    def validate_customer_info(self):
+        from tkinter import messagebox
+        first_name = self.first_name_entry.get().strip()
+        last_name = self.last_name_entry.get().strip()
+        phone = self.phone_entry.get().strip()
+        address = self.address_entry.get().strip()
+        
+        required_errors = []
+        if not first_name:
+            required_errors.append("First Name")
+        if not last_name:
+            required_errors.append("Last Name")
+        if not address:
+            required_errors.append("Address")
+        if not phone:
+            required_errors.append("Phone")
+            
+        if required_errors:
+            messagebox.showerror("Validation Error", "Please fill in all required fields:\n• " + "\n• ".join(required_errors))
+            return False
+            
+        if not phone.isdigit():
+            messagebox.showerror("Validation Error", "Phone number must contain only digits")
+            return False
+            
+        return True
+
+    def update_customer_number(self, cust_id=None):
+        import db
+        if cust_id is None:
+            self.cust_num = db.get_next_customer_id()
+        else:
+            self.cust_num = cust_id
+        self.customer_number_label.config(text=f"Customer Number: {self.cust_num}")
 
     def open_services_window(self):
         import db
@@ -578,6 +641,9 @@ class NewOrderPage(tk.Frame):
     def add_item(self):
         from tkinter import messagebox
         
+        if not self.validate_customer_info():
+            return
+            
         service = self.service_combo.get()
         if not service:
             messagebox.showerror("Missing Service", "Please select a service before adding an item")
@@ -710,31 +776,15 @@ class NewOrderPage(tk.Frame):
         from tkinter import messagebox
         import db
         
-        # Validate customer info
+        if not self.validate_customer_info():
+            return
+            
         first_name = self.first_name_entry.get().strip()
         last_name = self.last_name_entry.get().strip()
         phone = self.phone_entry.get().strip()
         address = self.address_entry.get().strip()
         email = self.email_entry.get().strip()
         notes = self.notes_text.get("1.0", "end-1c").strip()
-        
-        # Required field validation
-        required_errors = []
-        if not first_name:
-            required_errors.append("First name is required")
-        if not phone:
-            required_errors.append("Phone is required")
-        if not address:
-            required_errors.append("Address is required")
-        
-        if required_errors:
-            messagebox.showerror("Validation Error", "Please fill in all required fields:\n• " + "\n• ".join(required_errors))
-            return
-        
-        # Validate phone is numeric
-        if not phone.isdigit():
-            messagebox.showerror("Validation Error", "Phone number must contain only digits")
-            return
         
         # Check if there are items in the order
         items = self.order_tree.get_children()
@@ -798,6 +848,8 @@ class NewOrderPage(tk.Frame):
             for item_id in self.order_tree.get_children():
                 self.order_tree.delete(item_id)
             
+            self.update_customer_number()
+            
         except Exception as e:
             messagebox.showerror("Error", f"Failed to create order: {str(e)}")
 
@@ -852,6 +904,11 @@ class ViewOrderPage(tk.Frame):
 
         search_btn = tk.Button(filter_frame, text="Search", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.search_orders, width=8)
         search_btn.grid(row=0, column=2, padx=(5,15))
+
+        def check_orders_search_empty(event):
+            if not self.search_entry.get().strip():
+                self.refresh_all()
+        self.search_entry.bind('<KeyRelease>', check_orders_search_empty)
 
         tk.Label(filter_frame, text="Date From:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=3, padx=(8,5))
         self.date_from = tk.Entry(filter_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY, width=12)
@@ -974,7 +1031,7 @@ class ViewOrderPage(tk.Frame):
             
             for col in cols:
                 tree.heading(col, text=col)
-                tree.column(col, width=120 if col not in ('Action', 'Qty/Wt') else 80, anchor='w')
+                tree.column(col, width=120 if col not in ('Action', 'Qty/Wt') else (110 if col == 'Action' else 80), anchor='w')
 
             tree.pack(fill='both', expand=True)
             return tree
@@ -985,7 +1042,6 @@ class ViewOrderPage(tk.Frame):
 
         # bind click & reposition handlers to trees that have Action column
         for t in (self.unpaid_tree, self.paid_tree):
-            t.bind('<ButtonRelease-1>', self.on_tree_click)
             t.bind('<Motion>', self.on_tree_motion)
             # reposition overlays on configure, mouse actions and after scroll (add handlers so original click binding isn't replaced)
             t.bind('<Configure>', lambda e: self._reposition_action_overlays(e), add='+')
@@ -1069,6 +1125,39 @@ class ViewOrderPage(tk.Frame):
         except Exception:
             return None
 
+    def confirm_delete_order(self, iid):
+        import db
+        from tkinter import messagebox
+        is_child = '-' in str(iid)
+        if is_child:
+            try:
+                oid = int(str(iid).split('-')[0])
+                svc_id = int(str(iid).split('-')[1])
+            except Exception:
+                return
+            if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete this service line from Order {oid}?"):
+                try:
+                    success, parent_deleted = db.delete_service_row(oid, svc_id)
+                    if parent_deleted:
+                        messagebox.showinfo("Deleted", f"Service line deleted. The entire Order {oid} has been deleted since no services remain.")
+                    else:
+                        messagebox.showinfo("Deleted", f"Service line deleted from Order {oid}.")
+                    self.refresh_all()
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
+        else:
+            try:
+                oid = int(iid)
+            except Exception:
+                return
+            if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete Order {oid}?\nThis will permanently delete the order and all its items."):
+                try:
+                    db.delete_order(oid)
+                    messagebox.showinfo("Deleted", f"Order {oid} has been deleted.")
+                    self.refresh_all()
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
+
     def _create_action_overlays(self, tree):
         # create Label widgets positioned over the Action column cells (per-tree).
         # Place Edit overlays on all parent and child rows representing an order or service.
@@ -1093,30 +1182,27 @@ class ViewOrderPage(tk.Frame):
             if order_id is None:
                 continue
             try:
-                try:
-                    link_font = tkfont.Font(family="Segoe UI", size=9, underline=1)
-                except Exception:
-                    try:
-                        link_font = tkfont.Font(underline=1)
-                    except Exception:
-                        link_font = None
-
-                lbl = tk.Label(tree, text='Edit', fg='#0563c1', cursor='hand2', bg='white', bd=0)
-                if link_font:
-                    try:
-                        lbl.config(font=link_font)
-                    except Exception:
-                        pass
-                lbl.bind('<Button-1>', lambda e, target_iid=iid: self.open_edit_window(target_iid))
-                treemap[iid] = lbl
+                frame = tk.Frame(tree, bg='white')
+                has_children = len(tree.get_children(iid)) > 0
+                if has_children:
+                    dummy = tk.Button(frame, text='Edit', fg='white', bg='white', activebackground='white', activeforeground='white', bd=0, highlightthickness=0, state='disabled', disabledforeground='white')
+                    dummy.pack(side='left', padx=4, expand=True)
+                    del_btn = tk.Button(frame, text='Delete', fg='#e74c3c', cursor='hand2', bd=0, command=lambda target_iid=iid: self.confirm_delete_order(target_iid))
+                    del_btn.pack(side='left', padx=4, expand=True)
+                else:
+                    edit_btn = tk.Button(frame, text='Edit', fg='#0563c1', cursor='hand2', bd=0, command=lambda target_iid=iid: self.open_edit_window(target_iid))
+                    edit_btn.pack(side='left', padx=4, expand=True)
+                    del_btn = tk.Button(frame, text='Delete', fg='#e74c3c', cursor='hand2', bd=0, command=lambda target_iid=iid: self.confirm_delete_order(target_iid))
+                    del_btn.pack(side='left', padx=4, expand=True)
+                treemap[iid] = frame
 
                 bbox = tree.bbox(iid, f"#{action_col_index}")
                 if bbox:
                     x, y, w, h = bbox
-                    lbl.place(x=x+2, y=y+1, width=w-4, height=h-2)
-                    lbl.lift()
+                    frame.place(x=x+2, y=y+1, width=w-4, height=h-2)
+                    frame.lift()
                 else:
-                    lbl.place_forget()
+                    frame.place_forget()
             except Exception:
                 continue
         self.action_overlays[tree] = treemap
@@ -1321,18 +1407,19 @@ class ViewOrderPage(tk.Frame):
             order_matched = False
             matched_child_iids = []
 
-            # 1. Match by parent OrderID
-            if str(oid).startswith(term):
+            # 1. Match by parent OrderID (strict: must be exact integer match)
+            if str(oid) == term:
                 order_matched = True
 
             # 2. Match by customer name
             if term.lower() in customer_name.lower():
                 order_matched = True
 
-            # 3. Match by child service ID or service name
+            # 3. Match by child service ID (exact: e.g. "1-2") or by parent ID prefix (e.g. "1" matches "1-1", "1-2")
             for srow in svc_rows:
                 child_iid = f"{oid}-{srow['service_id']}"
-                if child_iid.startswith(term) or term == child_iid:
+                # Exact child ID match (e.g. search "1-2") OR parent ID search (e.g. search "1" matches "1-N")
+                if term == child_iid or (term == str(oid)):
                     order_matched = True
                     matched_child_iids.append(child_iid)
                 elif term.lower() in srow['service_name'].lower():
@@ -1815,8 +1902,14 @@ class ViewOrderPage(tk.Frame):
             s = str(row_id)
             if s.endswith('-total') or s.endswith('-0'):
                 return
+            if '-' not in s:
+                # Parent row: check if it's mixed services parent (has children in tree)
+                # If so, do not open edit window because mixed parent has no edit button
+                if len(widget.get_children(s)) > 0:
+                    return
             self.open_edit_window(row_id)
 
+    #FOR VIEW ORDER PAGE
     def open_edit_window(self, target_id):
         import db
         from tkinter import messagebox
@@ -1841,149 +1934,134 @@ class ViewOrderPage(tk.Frame):
         except Exception:
             pass
 
+        # Retrieve the service row we are editing
+        svc_rows = db.get_order_service_rows(oid)
+        if is_child:
+            target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+        else:
+            target_svc = svc_rows[0] if svc_rows else None
+
+        if not target_svc:
+            messagebox.showerror("Not found", "Service details not found")
+            return
+
         edit_win = tk.Toplevel(self)
         edit_win.title(f"Edit Order {target_id}" if not is_child else f"Edit Service {target_id}")
-        edit_win.geometry("520x420")
+        edit_win.geometry("500x480")
         edit_win.resizable(False, False)
         edit_win.grab_set()
 
-        form = tk.Frame(edit_win, padx=12, pady=12)
+        form = tk.Frame(edit_win, padx=20, pady=20, bg=PRIMARY)
         form.pack(fill='both', expand=True)
         form.columnconfigure(1, weight=1)
 
-        if not is_child:
-            # Edit Parent Order UI
-            tk.Label(form, text="First Name:").grid(row=0, column=0, sticky='w')
-            first_name = tk.Entry(form)
-            first_name.grid(row=0, column=1, sticky='ew')
-            first_name.insert(0, order.get('First_Name',''))
+        # Helper to parse number from Qty/Wt string
+        def parse_qty_value(raw_str):
+            s = raw_str.strip().lower()
+            m = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
+            if m:
+                return float(m.group(1))
+            return 0.0
 
-            tk.Label(form, text="Last Name:").grid(row=1, column=0, sticky='w')
-            last_name = tk.Entry(form)
-            last_name.grid(row=1, column=1, sticky='ew')
-            last_name.insert(0, order.get('Last_Name',''))
-
-            tk.Label(form, text="Email:").grid(row=2, column=0, sticky='w')
-            email = tk.Entry(form)
-            email.grid(row=2, column=1, sticky='ew')
-            email.insert(0, order.get('Email',''))
-
-            tk.Label(form, text="Phone:").grid(row=3, column=0, sticky='w')
-            ph = tk.Entry(form)
-            ph.grid(row=3, column=1, sticky='ew')
-            ph.insert(0, order.get('Phone_Number',''))
-
-            tk.Label(form, text="Status:").grid(row=4, column=0, sticky='w')
-            status = ttk.Combobox(form, values=["Received","In-Progress","Ready","Released"], state='readonly')
-            status.grid(row=4, column=1, sticky='ew')
-            status.set(order['Order_Status'])
-
-            # tk.Label(form, text="Notes:").grid(row=5, column=0, sticky='nw')
-            # notes = tk.Text(form, height=6)
-            # notes.grid(row=5, column=1, sticky='ew')
-            # notes.insert('1.0', order.get('Order_Notes') or '')
-
-            def save_changes():
-                try:
-                    first = first_name.get().strip()
-                    last = last_name.get().strip()
-                    db.update_customer(order['CustomerID'], first, last, ph.get().strip(), email.get().strip(), '')
-                    # db.update_order(oid, status.get(), notes.get('1.0', 'end-1c').strip())
-                    messagebox.showinfo('Saved', 'Order updated')
-                    edit_win.destroy()
-                    self.refresh_all()
-                except Exception as e:
-                    messagebox.showerror('Error', str(e))
-
-            def delete_target():
-                if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete Order {oid}?\nThis will permanently delete the order and all its items."):
-                    try:
-                        db.delete_order(oid)
-                        messagebox.showinfo("Deleted", f"Order {oid} has been deleted.")
-                        edit_win.destroy()
-                        self.refresh_all()
-                    except Exception as e:
-                        messagebox.showerror('Error', str(e))
-
-        else:
-            # Edit Child Service UI
-            svc_rows = db.get_order_service_rows(oid)
-            target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
-            if not target_svc:
-                messagebox.showerror("Not found", f"Service details not found for service {svc_id}")
-                edit_win.destroy()
-                return
-
-            tk.Label(form, text="Service Name:").grid(row=0, column=0, sticky='w', pady=8)
-            tk.Label(form, text=target_svc['service_name'], font=("Arial", 11, "bold")).grid(row=0, column=1, sticky='w', pady=8)
-
-            tk.Label(form, text="Qty/Wt:").grid(row=1, column=0, sticky='w', pady=8)
-            qty_entry = tk.Entry(form)
-            qty_entry.grid(row=1, column=1, sticky='ew', pady=8)
-            qty_entry.insert(0, str(target_svc['qty_display']))
-
-            tk.Label(form, text="Subtotal (₱):").grid(row=2, column=0, sticky='w', pady=8)
-            subtotal_entry = tk.Entry(form)
-            subtotal_entry.grid(row=2, column=1, sticky='ew', pady=8)
-            subtotal_entry.insert(0, f"{target_svc['subtotal']:.2f}")
-
-            tk.Label(form, text="Status:").grid(row=3, column=0, sticky='w', pady=8)
-            status_combo = ttk.Combobox(form, values=["Received","In-Progress","Ready","Released"], state='readonly')
-            status_combo.grid(row=3, column=1, sticky='ew', pady=8)
-            status_combo.set(target_svc['status'])
-
-            tk.Label(form, text="Paid:").grid(row=4, column=0, sticky='w', pady=8)
-            paid_combo = ttk.Combobox(form, values=["Yes", "No"], state='readonly')
-            paid_combo.grid(row=4, column=1, sticky='ew', pady=8)
-            paid_combo.set(target_svc['paid'])
-
-            # Read-only display for per-item notes
-            tk.Label(form, text="Notes:").grid(row=5, column=0, sticky='nw', pady=8)
-            notes_display = tk.Text(form, height=4, width=40, wrap='word', bg='white', relief='sunken')
-            notes_display.grid(row=5, column=1, sticky='ew', pady=8)
+        # Calculate unit price
+        unit_price = 0.0
+        try:
+            qty_val = parse_qty_value(target_svc['qty_display'])
+            if qty_val > 0:
+                unit_price = target_svc['subtotal'] / qty_val
+        except Exception:
+            pass
+        
+        if unit_price == 0.0:
             try:
-                notes_display.insert('1.0', target_svc.get('notes','') or '')
-                notes_display.config(state='disabled')
+                with sqlite3.connect("Laundrify.db") as conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT Service_Unit_Price FROM SERVICES WHERE Service_Type = ?", (target_svc['service_name'],))
+                    srow = cur.fetchone()
+                    if srow:
+                        unit_price = float(srow[0])
             except Exception:
                 pass
 
-            def save_changes():
-                try:
-                    qty_val = qty_entry.get().strip()
-                    subtotal = float(subtotal_entry.get().strip())
-                    status = status_combo.get()
-                    paid_val = paid_combo.get() == "Yes"
-                    
-                    db.update_service_details(oid, svc_id, qty_val, subtotal, status, paid_val)
-                    messagebox.showinfo('Saved', 'Service details updated')
-                    edit_win.destroy()
-                    self.refresh_all()
-                except ValueError:
-                    messagebox.showerror('Error', 'Subtotal must be a valid number')
-                except Exception as e:
-                    messagebox.showerror('Error', str(e))
-
-            def delete_target():
-                if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete service {target_svc['service_name']} ({target_id})?\nIf this is the only service in the order, the order itself will be deleted."):
-                    try:
-                        _, parent_deleted = db.delete_service_row(oid, svc_id)
-                        if parent_deleted:
-                            messagebox.showinfo("Deleted", f"Service deleted. Since it was the last service, Order {oid} has also been deleted.")
-                        else:
-                            messagebox.showinfo("Deleted", f"Service {target_svc['service_name']} has been deleted from Order {oid}.")
-                        edit_win.destroy()
-                        self.refresh_all()
-                    except Exception as e:
-                        messagebox.showerror('Error', str(e))
-
-        # Bottom Button Frame (Confirm, Delete, Cancel)
-        btn_frame = tk.Frame(form, bg='white')
-        btn_frame.grid(row=6, column=0, columnspan=2, pady=15, sticky='ew')
-        btn_frame.columnconfigure((0, 1, 2), weight=1)
+        # Header Labels (pre-established font style)
+        title_lbl = tk.Label(form, text=f"Order {oid}'s {target_svc['service_name']} Service", font=("Cooper Black", 14), bg=PRIMARY, fg=SECONDARY, anchor='w')
+        title_lbl.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 2))
         
-        tk.Button(btn_frame, text='Confirm', command=save_changes, font=("Arial", 11, "bold"), bg="#3498db", fg="white", height=2, cursor="hand2").grid(row=0, column=0, sticky='ew', padx=5)
-        tk.Button(btn_frame, text='Delete', command=delete_target, font=("Arial", 11, "bold"), bg="#e74c3c", fg="white", height=2, cursor="hand2").grid(row=0, column=1, sticky='ew', padx=5)
-        tk.Button(btn_frame, text='Cancel', command=edit_win.destroy, font=("Arial", 11), bg="#95a5a6", fg="white", height=2, cursor="hand2").grid(row=0, column=2, sticky='ew', padx=5)
+        cust_lbl = tk.Label(form, text=f"From {order['First_Name']} {order['Last_Name']}", font=("Arial", 11, "bold"), bg=PRIMARY, fg="#555555", anchor='w')
+        cust_lbl.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 20))
+
+        # Qty/Wt:
+        tk.Label(form, text="Qty/Wt:", font=TTL_TEXT, bg=PRIMARY).grid(row=2, column=0, sticky='w', pady=8)
+        qty_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=1, highlightcolor=SECONDARY)
+        qty_entry.grid(row=2, column=1, sticky='ew', pady=8, ipady=3)
+        qty_entry.insert(0, str(target_svc['qty_display']))
+
+        # Subtotal (P):
+        tk.Label(form, text="Subtotal (P):", font=TTL_TEXT, bg=PRIMARY).grid(row=3, column=0, sticky='w', pady=8)
+        subtotal_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=1, highlightcolor=SECONDARY)
+        subtotal_entry.grid(row=3, column=1, sticky='ew', pady=8, ipady=3)
+        
+        def set_subtotal_display(val):
+            subtotal_entry.config(state='normal')
+            subtotal_entry.delete(0, tk.END)
+            subtotal_entry.insert(0, f"{val:.2f}")
+            subtotal_entry.config(state='readonly')
+            
+        set_subtotal_display(target_svc['subtotal'])
+
+        # Recalculate subtotal on key release in Qty/Wt entry
+        def recalculate_price(event=None):
+            try:
+                qty_val = parse_qty_value(qty_entry.get())
+                new_subtotal = qty_val * unit_price
+                set_subtotal_display(new_subtotal)
+            except Exception:
+                pass
+
+        qty_entry.bind('<KeyRelease>', recalculate_price)
+
+        # Status:
+        tk.Label(form, text="Status:", font=TTL_TEXT, bg=PRIMARY).grid(row=4, column=0, sticky='w', pady=8)
+        status_combo = ttk.Combobox(form, values=["Received","In-Progress","Ready","Released"], state='readonly', font=REG_TEXT)
+        status_combo.grid(row=4, column=1, sticky='ew', pady=8, ipady=3)
+        status_combo.set(target_svc['status'])
+
+        # Paid:
+        tk.Label(form, text="Paid:", font=TTL_TEXT, bg=PRIMARY).grid(row=5, column=0, sticky='w', pady=8)
+        paid_combo = ttk.Combobox(form, values=["Yes", "No"], state='readonly', font=REG_TEXT)
+        paid_combo.grid(row=5, column=1, sticky='ew', pady=8, ipady=3)
+        paid_combo.set(target_svc['paid'])
+
+        # Notes:
+        tk.Label(form, text="Notes:", font=TTL_TEXT, bg=PRIMARY).grid(row=6, column=0, sticky='nw', pady=8)
+        notes_text = tk.Text(form, height=4, width=30, font=REG_TEXT, highlightthickness=1, highlightcolor=SECONDARY)
+        notes_text.grid(row=6, column=1, sticky='ew', pady=8)
+        notes_text.insert('1.0', target_svc.get('notes','') or '')
+
+        def save_changes():
+            try:
+                qty_val = qty_entry.get().strip()
+                subtotal = float(subtotal_entry.get().strip())
+                status = status_combo.get()
+                paid_val = paid_combo.get() == "Yes"
+                notes = notes_text.get("1.0", "end-1c").strip()
+                
+                db.update_service_details(oid, target_svc['service_id'], qty_val, subtotal, status, paid_val, notes)
+                messagebox.showinfo('Saved', 'Service details updated')
+                edit_win.destroy()
+                self.refresh_all()
+            except ValueError:
+                messagebox.showerror('Error', 'Subtotal must be a valid number')
+            except Exception as e:
+                messagebox.showerror('Error', str(e))
+
+        # Bottom Button Frame (Cancel, Confirm) side-by-side
+        btn_frame = tk.Frame(form, bg=PRIMARY)
+        btn_frame.grid(row=7, column=0, columnspan=2, pady=(20, 10), sticky='ew')
+        btn_frame.columnconfigure((0, 1), weight=1)
+        
+        tk.Button(btn_frame, text='Cancel', command=edit_win.destroy, font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, height=2, cursor="hand2").grid(row=0, column=0, sticky='ew', padx=5)
+        tk.Button(btn_frame, text='Confirm', command=save_changes, font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, height=2, cursor="hand2").grid(row=0, column=1, sticky='ew', padx=5)
 
 class CustomersPage(tk.Frame):
     def __init__(self, parent, controller):
@@ -2023,6 +2101,18 @@ class CustomersPage(tk.Frame):
         self.search_last = tk.Entry(search_frame, width=15, font=REG_TEXT)
         self.search_last.grid(row=0, column=6)
         tk.Button(search_frame, text='Search by Name', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.search_by_name).grid(row=0, column=7, padx=8)
+
+        def check_id_empty(event):
+            if not self.search_id_entry.get().strip():
+                self.refresh_customers()
+
+        def check_names_empty(event):
+            if not self.search_first.get().strip() and not self.search_last.get().strip():
+                self.refresh_customers()
+
+        self.search_id_entry.bind('<KeyRelease>', check_id_empty)
+        self.search_first.bind('<KeyRelease>', check_names_empty)
+        self.search_last.bind('<KeyRelease>', check_names_empty)
 
         sep = ttk.Separator(main_frame, orient='horizontal')
         sep.grid(row=2, column=0, sticky='ew', padx=8, pady=(4,8))
@@ -2122,8 +2212,9 @@ class CustomersPage(tk.Frame):
             customers = db.get_customers()
             results = []
             for c in customers:
-                fn = (c.get('First_Name','') or '').lower()
-                ln = (c.get('Last_Name','') or '').lower()
+                cc = dict(c)
+                fn = (cc.get('First_Name','') or '').lower()
+                ln = (cc.get('Last_Name','') or '').lower()
                 if first and first.lower() not in fn:
                     continue
                 if last and last.lower() not in ln:
@@ -2142,9 +2233,9 @@ class CustomersPage(tk.Frame):
             if key == 'id':
                 customers.sort(key=lambda c: int(c['CustomerID']))
             elif key == 'first':
-                customers.sort(key=lambda c: (c.get('First_Name') or '').lower())
+                customers.sort(key=lambda c: (dict(c).get('First_Name') or '').lower())
             elif key == 'last':
-                customers.sort(key=lambda c: (c.get('Last_Name') or '').lower())
+                customers.sort(key=lambda c: (dict(c).get('Last_Name') or '').lower())
             self.refresh_customers(customers)
         except Exception as e:
             from tkinter import messagebox
@@ -2182,11 +2273,8 @@ class CustomersPage(tk.Frame):
         for iid in self.customer_tree.get_children():
             try:
                 frame = tk.Frame(self.customer_tree, bg='white')
-                # use grid inside the overlay frame
                 btn_edit = tk.Button(frame, text='Edit', fg='#0563c1', cursor='hand2', bd=0, command=lambda cid=iid: self.open_edit_window(cid))
-                btn_delete = tk.Button(frame, text='Delete', fg='#e74c3c', cursor='hand2', bd=0, command=lambda cid=iid: self._confirm_delete(cid))
-                btn_edit.grid(row=0, column=0, padx=(2,4))
-                btn_delete.grid(row=0, column=1, padx=(4,2))
+                btn_edit.pack(expand=True)
                 treemap[iid] = frame
                 bbox = self.customer_tree.bbox(iid, f"#{action_col_index}")
                 if bbox:
@@ -2226,7 +2314,8 @@ class CustomersPage(tk.Frame):
                     frame.lift()
                 except Exception:
                     pass
-
+    
+    #FOR CUSTOMER PAGE
     def open_edit_window(self, iid):
         import db
         from tkinter import messagebox
@@ -2235,9 +2324,11 @@ class CustomersPage(tk.Frame):
         if not rec:
             messagebox.showerror('Error', 'Customer not found')
             return
+        rec = dict(rec)
         edit_win = tk.Toplevel(self)
         edit_win.title(f"Edit Customer {cid}")
         edit_win.geometry("420x360")
+        edit_win.resizable(False, False)
         edit_win.grab_set()
         edit_win.rowconfigure(0, weight=1); edit_win.columnconfigure(0, weight=1)
 
@@ -2274,9 +2365,8 @@ class CustomersPage(tk.Frame):
             except Exception as e:
                 messagebox.showerror('Error', str(e))
 
-        btnf = tk.Frame(form); btnf.grid(row=5, column=0, columnspan=2, pady=12); btnf.columnconfigure((0,1), weight=1)
+        btnf = tk.Frame(form); btnf.grid(row=5, column=0, columnspan=2, pady=12); btnf.columnconfigure(0, weight=1)
         tk.Button(btnf, text='Save', command=save_changes, bg=SECONDARY, fg='white').grid(row=0, column=0, sticky='ew', padx=6)
-        tk.Button(btnf, text='Delete', command=lambda: (messagebox.askyesno('Confirm','Delete customer?') and do_delete()), bg='#e74c3c', fg='white').grid(row=0, column=1, sticky='ew', padx=6)
 
 class ReportsPage(tk.Frame):
     def __init__(self, parent, controller):
