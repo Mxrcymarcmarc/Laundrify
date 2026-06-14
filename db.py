@@ -546,55 +546,75 @@ def process_payment(order_id, amount_paid):
     
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT Order_Total_Price FROM ORDERS WHERE OrderID = ?", (order_id,))
-        result = cursor.fetchone()
-        
-        if not result:
+        cursor.execute("SELECT OrderID FROM ORDERS WHERE OrderID = ?", (order_id,))
+        if not cursor.fetchone():
             return {
                 'success': False,
                 'message': 'Order not found'
             }
-        
-        total_amount = result[0]
-        
-        if amount_paid < total_amount:
+
+        cursor.execute(
+            "SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL",
+            (order_id,)
+        )
+        due_row = cursor.fetchone()
+        due_amount = float(due_row[0]) if due_row and due_row[0] is not None else 0.0
+
+        if due_amount <= 0:
             return {
                 'success': False,
-                'total_amount': total_amount,
-                'paid_amount': amount_paid,
-                'short_amount': total_amount - amount_paid,
-                'message': f'Insufficient payment. Short by ₱{total_amount - amount_paid:.2f}'
+                'message': 'Order is already fully paid.'
             }
-        
+
+        if amount_paid < due_amount:
+            return {
+                'success': False,
+                'total_amount': due_amount,
+                'paid_amount': amount_paid,
+                'short_amount': due_amount - amount_paid,
+                'message': f'Insufficient payment. Short by ₱{due_amount - amount_paid:.2f}'
+            }
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         cursor.execute(
             "INSERT INTO PAYMENTS (OrderID, Amount_Paid, Payment_Date) VALUES (?, ?, ?)",
             (order_id, amount_paid, timestamp)
         )
-        
-        cursor.execute(
-            "UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?",
-            (timestamp, order_id)
-        )
-        
-        # Cascade payment status to all child services
+
         cursor.execute(
             "UPDATE ORDER_DETAILS SET Service_Payed_At = ? WHERE OrderID = ? AND Service_Payed_At IS NULL",
             (timestamp, order_id)
         )
-        
+
+        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
+        unpaid_count = cursor.fetchone()[0]
+        if unpaid_count == 0:
+            cursor.execute("UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?", (timestamp, order_id))
+
         conn.commit()
-        
-        change = amount_paid - total_amount
+
+        change = amount_paid - due_amount
         return {
             'success': True,
-            'total_amount': total_amount,
+            'total_amount': due_amount,
             'paid_amount': amount_paid,
             'change': change,
             'message': 'Payment processed successfully'
         }
+
+
+def get_order_amount_due(order_id):
+    """Return the remaining unpaid subtotal for an order."""
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL",
+            (order_id,)
+        )
+        row = cursor.fetchone()
+        return float(row[0]) if row and row[0] is not None else 0.0
+
 
 def get_next_customer_id():
     """Return the lowest unused CustomerID, filling any gaps left by deletions."""
@@ -902,10 +922,11 @@ def get_revenue_report_data():
     
     query = """
         SELECT 
-            strftime('%w', Payment_Date) as day_num,
-            SUM(Amount_Paid) as total_revenue
-        FROM PAYMENTS
-        WHERE Payment_Date >= date('now', 'weekday 0', '-7 days')
+            strftime('%w', o.Order_Payed_At) as day_num,
+            SUM(o.Order_Total_Price) as total_revenue
+        FROM ORDERS o
+        WHERE o.Order_Payed_At IS NOT NULL
+          AND date(o.Order_Payed_At) >= date('now', '-6 days')
         GROUP BY day_num
     """
     
@@ -915,9 +936,9 @@ def get_revenue_report_data():
         raw_data = cursor.fetchall()
         
     for day_num, total in raw_data:
-        day_name = day_mapping.get(day_num)
+        day_name = day_mapping.get(str(day_num))
         if day_name:
-            results_dict[day_name] = total
+            results_dict[day_name] = float(total or 0)
             
     ordered_days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     ordered_revenue = [results_dict[day] for day in ordered_days]

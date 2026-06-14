@@ -1546,24 +1546,26 @@ class ViewOrderPage(tk.Frame):
 
 
     def open_payment_window(self):
+        
         import db
         from tkinter import messagebox
 
         payment_win = tk.Toplevel(self)
         payment_win.title("Process Payment")
         payment_win.geometry("520x450")
+        payment_win.configure(bg=PRIMARY)
         payment_win.resizable(False, False)
         payment_win.grab_set()
 
-        container = tk.Frame(payment_win, bd=2, relief="solid", bg="white")
+        container = tk.Frame(payment_win, bd=2, relief="solid", bg=PRIMARY)
         container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        header = tk.Frame(container, bg="#2c3e50", height=60)
+        header = tk.Frame(container, bg=SECONDARY, height=60)
         header.pack(fill="x")
         header.pack_propagate(False)
-        tk.Label(header, text="Process Payment", font=("Arial", 16, "bold"), bg="#2c3e50", fg="white").pack(pady=15)
+        tk.Label(header, text="Process Payment", font=HDR_TEXT, bg=SECONDARY, fg=PRIMARY).pack(pady=10)
 
-        form_frame = tk.Frame(container, bg="white")
+        form_frame = tk.Frame(container, bg=PRIMARY)
         form_frame.pack(fill="both", expand=True, padx=30, pady=30)
         form_frame.columnconfigure(1, weight=1)
 
@@ -1576,19 +1578,22 @@ class ViewOrderPage(tk.Frame):
                 selected_order_id = str(sel[0])
 
         order_entry_var = tk.StringVar(value=selected_order_id)
-        order_entry = tk.Entry(form_frame, textvariable=order_entry_var, width=30, font=("Arial", 10))
+        order_entry = tk.Entry(form_frame, textvariable=order_entry_var, width=30, font=REG_TEXT, highlightthickness=1, highlightbackground=ACCENT, highlightcolor=SECONDARY)
         order_entry.grid(row=0, column=1, sticky="ew", pady=12, padx=10)
 
-        tk.Label(form_frame, text="Order ID / Customer:", font=("Arial", 11), bg="white").grid(row=0, column=0, sticky="w", pady=12)
+        tk.Label(form_frame, text="Order ID / Customer:", font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=0, column=0, sticky="w", pady=12)
 
         def _choose_from_matches_payment(matches):
             pick_win = tk.Toplevel(payment_win)
             pick_win.title('Select Order')
             pick_win.geometry('400x300')
-            lb = tk.Listbox(pick_win)
+            pick_win.configure(bg=PRIMARY)
+            
+            lb = tk.Listbox(pick_win, font=REG_TEXT, selectbackground=SECONDARY, selectforeground=PRIMARY)
             for oid, disp in matches:
                 lb.insert('end', f"{oid} - {disp}")
             lb.pack(fill='both', expand=True, padx=8, pady=8)
+            
             def _select():
                 sel = lb.curselection()
                 if not sel:
@@ -1596,15 +1601,15 @@ class ViewOrderPage(tk.Frame):
                 text = lb.get(sel[0])
                 oid = text.split(' - ', 1)[0]
                 order_entry_var.set(oid)
-                # update amount display
+                # update amount display from unpaid child subtotal
                 try:
-                    o = db.get_order_details(int(oid))
-                    if o:
-                        amount_due_display.config(text=f"₱{o['Order_Total_Price']:.2f}")
+                    due_amount = db.get_order_amount_due(int(oid))
+                    amount_due_display.config(text=f"₱{due_amount:.2f}")
                 except:
                     pass
                 pick_win.destroy()
-            btnf = tk.Button(pick_win, text='Select', command=_select)
+                
+            btnf = tk.Button(pick_win, text='Select', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=_select, cursor="hand2")
             btnf.pack(pady=6)
 
         def _find_order_payment():
@@ -1634,7 +1639,8 @@ class ViewOrderPage(tk.Frame):
                     messagebox.showinfo('Find Order', f'Order {q} not found', parent=payment_win)
                     return
                 order_entry_var.set(str(o['OrderID']))
-                amount_due_display.config(text=f"₱{o['Order_Total_Price']:.2f}")
+                due_amount = db.get_order_amount_due(int(q))
+                amount_due_display.config(text=f"₱{due_amount:.2f}")
                 cash_entry.delete(0, tk.END)
                 return
             # search by name
@@ -1650,13 +1656,10 @@ class ViewOrderPage(tk.Frame):
                 return
             if len(matches) == 1:
                 order_entry_var.set(str(matches[0][0]))
-                o = db.get_order_details(int(matches[0][0]))
-                if o:
-                    amount_due_display.config(text=f"₱{o['Order_Total_Price']:.2f}")
+                due_amount = db.get_order_amount_due(int(matches[0][0]))
+                amount_due_display.config(text=f"₱{due_amount:.2f}")
                 return
             _choose_from_matches_payment(matches)
-
-        tk.Button(form_frame, text='Find', command=_find_order_payment).grid(row=0, column=2, padx=6)
 
         # Set initial amount due if pre-populated
         initial_amount = "0.00"
@@ -1672,17 +1675,22 @@ class ViewOrderPage(tk.Frame):
                 else:
                     o = db.get_order_details(int(oid_clean))
                     if o:
-                        initial_amount = f"₱{o['Order_Total_Price']:.2f}"
+                        due_amount = db.get_order_amount_due(int(oid_clean))
+                        initial_amount = f"₱{due_amount:.2f}"
             except Exception:
                 pass
 
-        amount_due_display = tk.Label(form_frame, text=initial_amount, font=("Arial", 13, "bold"), bg="#ecf0f1", fg="#2c3e50", relief="sunken", width=35)
+        amount_due_display = tk.Label(form_frame, text=initial_amount, font=HDR2_TEXT, bg=PRIMARY, fg=SECONDARY, relief="sunken", width=35, bd=1)
         amount_due_display.grid(row=1, column=1, sticky="ew", pady=12, padx=10)
-        tk.Label(form_frame, text="Amount Due (₱):", font=("Arial", 11), bg="white").grid(row=1, column=0, sticky="w", pady=12)
+        tk.Label(form_frame, text="Amount Due (₱):", font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=1, column=0, sticky="w", pady=12)
 
-        cash_entry = tk.Entry(form_frame, width=37, font=("Arial", 10), bd=1, relief="solid")
+        cash_entry = tk.Entry(form_frame, width=37, font=REG_TEXT, bd=1, relief="solid", highlightthickness=1, highlightbackground=ACCENT, highlightcolor=SECONDARY)
         cash_entry.grid(row=2, column=1, sticky="ew", pady=12, padx=10)
-        tk.Label(form_frame, text="Cash Received (₱):", font=("Arial", 11), bg="white").grid(row=2, column=0, sticky="w", pady=12)
+        tk.Label(form_frame, text="Cash Received (₱):", font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=2, column=0, sticky="w", pady=12)
+
+        # Bind search triggers safely to inputs as originally intended
+        order_entry.bind("<FocusOut>", lambda e: _find_order_payment())
+        order_entry.bind("<Return>", lambda e: _find_order_payment())
 
         def process_payment():
             order_id = order_entry_var.get().strip()
@@ -1711,11 +1719,12 @@ class ViewOrderPage(tk.Frame):
             except Exception as e:
                 messagebox.showerror("Error", f"Database error: {str(e)}", parent=payment_win)
 
-        btn_frame = tk.Frame(container, bg="white")
+        btn_frame = tk.Frame(container, bg=PRIMARY)
         btn_frame.pack(fill="x", padx=30, pady=20)
         btn_frame.columnconfigure((0, 1), weight=1)
-        tk.Button(btn_frame, text="Process Payment", command=process_payment, font=("Arial", 11, "bold"), bg="#3498db", fg="white", height=2, cursor="hand2").grid(row=0, column=0, sticky="ew", padx=5)
-        tk.Button(btn_frame, text="Cancel", command=payment_win.destroy, font=("Arial", 11), bg="#95a5a6", fg="white", height=2, cursor="hand2").grid(row=0, column=1, sticky="ew", padx=5)
+        
+        tk.Button(btn_frame, text="Process Payment", command=process_payment, font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, height=2, cursor="hand2", bd=1, relief="raised").grid(row=0, column=0, sticky="ew", padx=5)
+        tk.Button(btn_frame, text="Cancel", command=payment_win.destroy, font=REG_TEXT, bg=ACCENT, fg=SECONDARY, height=2, cursor="hand2", bd=1, relief="raised").grid(row=0, column=1, sticky="ew", padx=5)
 
     def on_tree_motion(self, event):
         widget = event.widget
@@ -1782,7 +1791,7 @@ class ViewOrderPage(tk.Frame):
 
         edit_win = tk.Toplevel(self)
         edit_win.title(f"Edit Order {target_id}" if not is_child else f"Edit Service {target_id}")
-        edit_win.geometry("500x480")
+        edit_win.geometry("500x450")
         edit_win.resizable(False, False)
         edit_win.grab_set()
 
@@ -2388,12 +2397,12 @@ class ReportsPage(tk.Frame):
             card1 = tk.Frame(kpi_frame, bg="#f0f8ff", bd=1, relief="solid", highlightbackground="#cce4ff", highlightthickness=1)
             card1.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
             tk.Label(card1, text="Total Daily Revenue", font=("Arial", 10, "bold"), bg="#f0f8ff", fg="#3498db").pack(pady=(10, 0))
-            tk.Label(card1, text=f"${total_rev}", font=("Arial", 18, "bold"), bg="#f0f8ff", fg="#2980b9").pack(pady=(0, 10))
+            tk.Label(card1, text=f"₱{total_rev:,.2f}", font=("Arial", 18, "bold"), bg="#f0f8ff", fg="#2980b9").pack(pady=(0, 10))
             
             card2 = tk.Frame(kpi_frame, bg="#f0f8ff", bd=1, relief="solid", highlightbackground="#cce4ff", highlightthickness=1)
             card2.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
             tk.Label(card2, text="Peak Hour Revenue", font=("Arial", 10, "bold"), bg="#f0f8ff", fg="#3498db").pack(pady=(10, 0))
-            tk.Label(card2, text=f"${peak_rev}", font=("Arial", 18, "bold"), bg="#f0f8ff", fg="#2980b9").pack(pady=(0, 10))
+            tk.Label(card2, text=f"₱{peak_rev:,.2f}", font=("Arial", 18, "bold"), bg="#f0f8ff", fg="#2980b9").pack(pady=(0, 10))
             
         elif report_type in ["received", "ready"]:
             kpi_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
@@ -2424,12 +2433,12 @@ class ReportsPage(tk.Frame):
             ax.plot(days, revenue, marker='o', linewidth=2, markersize=8, color='#3498db')
             ax.fill_between(range(len(days)), revenue, alpha=0.3, color='#3498db')
             ax.set_title("Revenue Trend", fontsize=14, fontweight='bold')
-            ax.set_ylabel("Amount ($)")
+            ax.set_ylabel("Amount (₱)")
             ax.grid(True, alpha=0.3)
             
             if revenue and max(revenue) > 0:
                 peak_idx = revenue.index(max(revenue))
-                ax.annotate(f"Peak: ${max(revenue)}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=0.8, ec='none'))
+                ax.annotate(f"Peak: ₱{max(revenue)}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=0.8, ec='none'))
                 
         elif report_type == "received":
             bars = ax.bar(hours, data, color='#e67e22', alpha=0.8)
