@@ -78,7 +78,7 @@ class App(tk.Frame):
 
         # create pages
         self.pages = {}
-        for Page in (NewOrderPage, ViewOrderPage, ReportsPage):
+        for Page in (NewOrderPage, ViewOrderPage, CustomersPage, ReportsPage):
             page = Page(container, self)
             page.grid(row=0, column=0, sticky="nsew")
             self.pages[Page.__name__] = page
@@ -86,25 +86,29 @@ class App(tk.Frame):
         # bottom navigation
         nav = tk.Frame(self, bg=PRIMARY)
         nav.grid(row=content_row+1, column=0, sticky="ew", padx=8, pady=15)
-        nav.columnconfigure((0,1,2), weight=1)
+        nav.columnconfigure((0,1,2,3), weight=1)
 
         self.nav_buttons = {}
         self.current_page = "NewOrderPage"
         
-        btn_new = tk.Button(nav, text="New Order", font=TTL_TEXT, command=lambda: self.show("NewOrderPage"), 
+        btn_new = tk.Button(nav, text="New Order", font=TTL_TEXT, command=lambda: self.show("NewOrderPage"),
                             height=2, cursor="hand2")
-        btn_view = tk.Button(nav, text="View Order", font=TTL_TEXT, command=lambda: self.show("ViewOrderPage"), 
+        btn_view = tk.Button(nav, text="View Order", font=TTL_TEXT, command=lambda: self.show("ViewOrderPage"),
                             height=2, cursor="hand2")
-        btn_reports = tk.Button(nav, text="Reports", font=TTL_TEXT, command=lambda: self.show("ReportsPage"), 
+        btn_customers = tk.Button(nav, text="Customers", font=TTL_TEXT, command=lambda: self.show("CustomersPage"),
+                            height=2, cursor="hand2")
+        btn_reports = tk.Button(nav, text="Reports", font=TTL_TEXT, command=lambda: self.show("ReportsPage"),
                             height=2, cursor="hand2")
 
         self.nav_buttons["NewOrderPage"] = btn_new
         self.nav_buttons["ViewOrderPage"] = btn_view
+        self.nav_buttons["CustomersPage"] = btn_customers
         self.nav_buttons["ReportsPage"] = btn_reports
 
         btn_new.grid(row=0, column=0, padx=12, sticky="ew")
         btn_view.grid(row=0, column=1, padx=12, sticky="ew")
-        btn_reports.grid(row=0, column=2, padx=12, sticky="ew")
+        btn_customers.grid(row=0, column=2, padx=12, sticky="ew")
+        btn_reports.grid(row=0, column=3, padx=12, sticky="ew")
 
         self.show("NewOrderPage")
 
@@ -112,6 +116,7 @@ class App(tk.Frame):
         titles = {
             "NewOrderPage": "Laundrify - New Order",
             "ViewOrderPage": "Laundrify - View Order",
+            "CustomersPage": "Laundrify - Customers",
             "ReportsPage": "Laundrify - Reports",
         }
         # Update button styles
@@ -215,6 +220,10 @@ class NewOrderPage(tk.Frame):
         add_btn = tk.Button(left, text="Add Item", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.add_item, width=20)
         add_btn.grid(row=9, column=0, columnspan=2, pady=10)
 
+        # Lookup existing customer and autofill fields
+        lookup_btn = tk.Button(left, text="Lookup Customer", font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, command=self.lookup_customer, width=20)
+        lookup_btn.grid(row=10, column=0, columnspan=2, pady=(0,10))
+
         # right - instructions and order items area
         # header with Instruction label and gear button on same row
         header_frame = tk.Frame(right, bg=PRIMARY)
@@ -263,6 +272,131 @@ class NewOrderPage(tk.Frame):
 
         self.weight_var = None
         self.size_var = None
+
+    def lookup_customer(self):
+        import db
+        from tkinter import messagebox
+        # If phone entry has value, try to find directly
+        phone = self.phone_entry.get().strip()
+        if phone:
+            try:
+                for c in db.get_customers():
+                    if c['Phone_Number'] == phone:
+                        rec = dict(c)
+                        # populate fields
+                        self.first_name_entry.delete(0, tk.END); self.first_name_entry.insert(0, rec.get('First_Name',''))
+                        self.last_name_entry.delete(0, tk.END); self.last_name_entry.insert(0, rec.get('Last_Name',''))
+                        self.address_entry.delete(0, tk.END); self.address_entry.insert(0, rec.get('Address','') or '')
+                        self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rec.get('Email','') or '')
+                        self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rec.get('Phone_Number','') or '')
+                        messagebox.showinfo('Found', f"Loaded customer {rec.get('First_Name','')} {rec.get('Last_Name','')}")
+                        return
+            except Exception:
+                pass
+
+        # Otherwise show a selection window with treeview to pick a customer
+        sel_win = tk.Toplevel(self)
+        sel_win.title('Select Customer')
+        sel_win.geometry('760x360')
+        sel_win.grab_set()
+        sel_win.rowconfigure(1, weight=1); sel_win.columnconfigure(0, weight=1)
+
+        # search row
+        top = tk.Frame(sel_win, padx=8, pady=6)
+        top.grid(row=0, column=0, sticky='ew')
+        top.columnconfigure((1,3), weight=1)
+        tk.Label(top, text='First Name:', font=TTL_TEXT).grid(row=0, column=0, sticky='w')
+        entry_first = tk.Entry(top, font=REG_TEXT)
+        entry_first.grid(row=0, column=1, sticky='ew', padx=6)
+        tk.Label(top, text='Last Name:', font=TTL_TEXT).grid(row=0, column=2, sticky='w', padx=(12,6))
+        entry_last = tk.Entry(top, font=REG_TEXT)
+        entry_last.grid(row=0, column=3, sticky='ew')
+        tk.Button(top, text='Search', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=lambda: populate_filtered()).grid(row=0, column=4, padx=8)
+
+        # container for tree
+        container = tk.Frame(sel_win, padx=8, pady=6)
+        container.grid(row=1, column=0, sticky='nsew')
+        container.rowconfigure(0, weight=1); container.columnconfigure(0, weight=1)
+
+        cols = ('ID','First Name','Last Name','Phone','Email','Address')
+        tree = ttk.Treeview(container, columns=cols, show='headings')
+        for c in cols:
+            tree.heading(c, text=c)
+            tree.column(c, width=110 if c!='Address' else 220, anchor='w')
+        tree.grid(row=0, column=0, sticky='nsew')
+        scrollbar = ttk.Scrollbar(container, command=tree.yview)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        def populate(customers=None):
+            for i in tree.get_children():
+                tree.delete(i)
+            import db as _db
+            try:
+                rows = customers if customers is not None else _db.get_customers()
+            except Exception:
+                rows = []
+            for r in rows:
+                rr = dict(r)
+                tree.insert('', 'end', iid=str(rr.get('CustomerID')), values=(rr.get('CustomerID'), rr.get('First_Name',''), rr.get('Last_Name',''), rr.get('Phone_Number',''), rr.get('Email',''), rr.get('Address','')))
+
+        def populate_filtered():
+            f = entry_first.get().strip().lower()
+            l = entry_last.get().strip().lower()
+            import db as _db
+            try:
+                allc = _db.get_customers()
+            except Exception:
+                allc = []
+            res = []
+            for c in allc:
+                fn = (c.get('First_Name','') or '').lower()
+                ln = (c.get('Last_Name','') or '').lower()
+                if f and f not in fn: continue
+                if l and l not in ln: continue
+                res.append(c)
+            populate(res)
+
+        def _on_double(e):
+            sel = tree.selection()
+            if not sel: return
+            cid = int(sel[0])
+            import db as _db
+            rec = _db.get_customer_details(cid)
+            if rec:
+                rd = dict(rec)
+                self.first_name_entry.delete(0, tk.END); self.first_name_entry.insert(0, rd.get('First_Name',''))
+                self.last_name_entry.delete(0, tk.END); self.last_name_entry.insert(0, rd.get('Last_Name',''))
+                self.address_entry.delete(0, tk.END); self.address_entry.insert(0, rd.get('Address','') or '')
+                self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rd.get('Email','') or '')
+                self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rd.get('Phone_Number','') or '')
+            sel_win.destroy()
+
+        tree.bind('<Double-1>', _on_double)
+
+        def _select():
+            sel = tree.selection()
+            if not sel: return
+            cid = int(sel[0])
+            import db as _db
+            rec = _db.get_customer_details(cid)
+            if rec:
+                rd = dict(rec)
+                self.first_name_entry.delete(0, tk.END); self.first_name_entry.insert(0, rd.get('First_Name',''))
+                self.last_name_entry.delete(0, tk.END); self.last_name_entry.insert(0, rd.get('Last_Name',''))
+                self.address_entry.delete(0, tk.END); self.address_entry.insert(0, rd.get('Address','') or '')
+                self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rd.get('Email','') or '')
+                self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rd.get('Phone_Number','') or '')
+            sel_win.destroy()
+
+        btnf = tk.Frame(sel_win)
+        btnf.grid(row=2, column=0, pady=8, sticky='ew')
+        btnf.columnconfigure((0,1,2), weight=1)
+        tk.Button(btnf, text='Select', command=_select, bg=SECONDARY, fg='white').grid(row=0, column=0, sticky='ew', padx=6)
+        tk.Button(btnf, text='Cancel', command=sel_win.destroy).grid(row=0, column=1, sticky='ew', padx=6)
+        tk.Button(btnf, text='Refresh', command=lambda: populate(), bg=PRIMARY, fg=SECONDARY).grid(row=0, column=2, sticky='ew', padx=6)
+
+        populate()
 
     def on_service_selected(self, event=None):
         # Clear previous widgets in dynamic frame
@@ -1850,6 +1984,299 @@ class ViewOrderPage(tk.Frame):
         tk.Button(btn_frame, text='Confirm', command=save_changes, font=("Arial", 11, "bold"), bg="#3498db", fg="white", height=2, cursor="hand2").grid(row=0, column=0, sticky='ew', padx=5)
         tk.Button(btn_frame, text='Delete', command=delete_target, font=("Arial", 11, "bold"), bg="#e74c3c", fg="white", height=2, cursor="hand2").grid(row=0, column=1, sticky='ew', padx=5)
         tk.Button(btn_frame, text='Cancel', command=edit_win.destroy, font=("Arial", 11), bg="#95a5a6", fg="white", height=2, cursor="hand2").grid(row=0, column=2, sticky='ew', padx=5)
+
+class CustomersPage(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.configure(bg=PRIMARY)
+        self.controller = controller
+        self.action_overlays = {}
+
+        main_frame = tk.Frame(self, bd=1, relief="solid", bg=PRIMARY)
+        main_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(3, weight=1)
+
+        # Header and count
+        header_frame = tk.Frame(main_frame, bg=PRIMARY)
+        header_frame.grid(row=0, column=0, sticky='ew', padx=12, pady=(8,4))
+        header_frame.columnconfigure(0, weight=1)
+        tk.Label(header_frame, text='There are {0} Customer Records'.format('0'), font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w')
+        self.count_label = header_frame.grid_slaves(row=0, column=0)[0]
+
+        # Search area
+        search_frame = tk.Frame(main_frame, bg=PRIMARY)
+        search_frame.grid(row=1, column=0, sticky='ew', padx=12, pady=6)
+        # left: ID search
+        tk.Label(search_frame, text='Search ID:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w')
+        self.search_id_entry = tk.Entry(search_frame, width=12, font=REG_TEXT)
+        self.search_id_entry.grid(row=0, column=1, padx=6)
+        tk.Button(search_frame, text='Search by ID', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.search_by_id).grid(row=0, column=2, padx=6)
+
+        # right: name search
+        tk.Label(search_frame, text='First Name:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=3, padx=(30,6))
+        self.search_first = tk.Entry(search_frame, width=15, font=REG_TEXT)
+        self.search_first.grid(row=0, column=4)
+        tk.Label(search_frame, text='Last Name:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=5, padx=(12,6))
+        self.search_last = tk.Entry(search_frame, width=15, font=REG_TEXT)
+        self.search_last.grid(row=0, column=6)
+        tk.Button(search_frame, text='Search by Name', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.search_by_name).grid(row=0, column=7, padx=8)
+
+        sep = ttk.Separator(main_frame, orient='horizontal')
+        sep.grid(row=2, column=0, sticky='ew', padx=8, pady=(4,8))
+
+        # Table area
+        table_frame = tk.Frame(main_frame)
+        table_frame.grid(row=3, column=0, sticky="nsew", padx=12, pady=6)
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+
+        scrollbar = ttk.Scrollbar(table_frame)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+
+        cols = ("First Name", "Last Name", "Phone", "Email", "Address", "Action")
+        self.customer_tree = ttk.Treeview(table_frame, columns=cols, show="tree headings", yscrollcommand=scrollbar.set)
+        self.customer_tree._scrollbar = scrollbar
+        scrollbar.config(command=self.customer_tree.yview)
+
+        self.customer_tree.heading('#0', text='ID')
+        self.customer_tree.column('#0', width=80, anchor='w')
+        for col in cols:
+            self.customer_tree.heading(col, text=col)
+            self.customer_tree.column(col, width=140 if col != 'Action' else 120, anchor='w')
+
+        self.customer_tree.grid(row=0, column=0, sticky='nsew')
+
+        # bind events
+        self.customer_tree.bind('<Configure>', lambda e: self._reposition_action_overlays(e), add='+')
+        self.customer_tree.bind('<ButtonRelease-1>', lambda e: self._reposition_action_overlays(e), add='+')
+        self.customer_tree.bind('<Motion>', lambda e: self._reposition_action_overlays(e), add='+')
+        try:
+            self.customer_tree._scrollbar.bind('<ButtonRelease-1>', lambda e: self._reposition_action_overlays(e), add='+')
+            self.customer_tree._scrollbar.bind('<B1-Motion>', lambda e: self._reposition_action_overlays(e), add='+')
+        except Exception:
+            pass
+
+        # Sort buttons at bottom
+        sort_frame = tk.Frame(main_frame, bg=PRIMARY)
+        sort_frame.grid(row=4, column=0, sticky='ew', padx=12, pady=(8,6))
+        tk.Label(sort_frame, width=12, text='Sort Rows By:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w')
+        tk.Button(sort_frame, width=12, text='ID', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.sort_by('id')).grid(row=0, column=1, padx=8)
+        tk.Button(sort_frame, width=12, text='First Name', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.sort_by('first')).grid(row=0, column=2, padx=8)
+        tk.Button(sort_frame, width=12, text='Last Name', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.sort_by('last')).grid(row=0, column=3, padx=8)
+
+        self.refresh_customers()
+
+    def refresh_customers(self, customers_list=None):
+        import db
+        # populate tree with provided list or all
+        for item in self.customer_tree.get_children():
+            self.customer_tree.delete(item)
+        try:
+            customers = customers_list if customers_list is not None else db.get_customers()
+        except Exception:
+            customers = []
+        for c in customers:
+            cid = c['CustomerID']
+            vals = (c['First_Name'], c['Last_Name'], c['Phone_Number'], c['Email'] or '', c['Address'] or '', '')
+            self.customer_tree.insert('', 'end', iid=str(cid), text=str(cid), values=vals)
+        # update count label
+        try:
+            cnt = len(customers)
+            self.count_label.config(text=f'There are {cnt} Customer Records')
+        except Exception:
+            pass
+        try:
+            self._create_action_overlays()
+        except Exception:
+            pass
+
+    def search_by_id(self):
+        import db
+        from tkinter import messagebox
+        q = self.search_id_entry.get().strip()
+        if not q:
+            self.refresh_customers(); return
+        if not q.isdigit():
+            messagebox.showwarning('Search', 'ID must be numeric')
+            return
+        try:
+            rec = db.get_customer_details(int(q))
+            if not rec:
+                messagebox.showinfo('Search', f'No customer found with ID {q}')
+                return
+            self.refresh_customers([rec])
+        except Exception as e:
+            messagebox.showerror('Search Error', str(e))
+
+    def search_by_name(self):
+        import db
+        from tkinter import messagebox
+        first = self.search_first.get().strip()
+        last = self.search_last.get().strip()
+        if not first and not last:
+            self.refresh_customers(); return
+        try:
+            customers = db.get_customers()
+            results = []
+            for c in customers:
+                fn = (c.get('First_Name','') or '').lower()
+                ln = (c.get('Last_Name','') or '').lower()
+                if first and first.lower() not in fn:
+                    continue
+                if last and last.lower() not in ln:
+                    continue
+                results.append(c)
+            if not results:
+                messagebox.showinfo('Search', 'No matching customers found')
+            self.refresh_customers(results)
+        except Exception as e:
+            messagebox.showerror('Search Error', str(e))
+
+    def sort_by(self, key):
+        import db
+        try:
+            customers = list(db.get_customers())
+            if key == 'id':
+                customers.sort(key=lambda c: int(c['CustomerID']))
+            elif key == 'first':
+                customers.sort(key=lambda c: (c.get('First_Name') or '').lower())
+            elif key == 'last':
+                customers.sort(key=lambda c: (c.get('Last_Name') or '').lower())
+            self.refresh_customers(customers)
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror('Sort Error', str(e))
+
+    def _confirm_delete(self, iid):
+        import db
+        from tkinter import messagebox
+        try:
+            cid = int(iid)
+        except Exception:
+            return
+        if messagebox.askyesno('Confirm Delete', f'Delete customer {cid}?'):
+            try:
+                db.delete_customer(cid)
+                self.refresh_customers()
+            except Exception as e:
+                messagebox.showerror('Error', str(e))
+
+    def _clear_action_overlays(self):
+        for w in list(self.action_overlays.values()):
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        self.action_overlays = {}
+
+    def _create_action_overlays(self):
+        self._clear_action_overlays()
+        cols = list(self.customer_tree['columns'])
+        if 'Action' not in cols:
+            return
+        action_col_index = cols.index('Action') + 1
+        treemap = {}
+        for iid in self.customer_tree.get_children():
+            try:
+                frame = tk.Frame(self.customer_tree, bg='white')
+                # use grid inside the overlay frame
+                btn_edit = tk.Button(frame, text='Edit', fg='#0563c1', cursor='hand2', bd=0, command=lambda cid=iid: self.open_edit_window(cid))
+                btn_delete = tk.Button(frame, text='Delete', fg='#e74c3c', cursor='hand2', bd=0, command=lambda cid=iid: self._confirm_delete(cid))
+                btn_edit.grid(row=0, column=0, padx=(2,4))
+                btn_delete.grid(row=0, column=1, padx=(4,2))
+                treemap[iid] = frame
+                bbox = self.customer_tree.bbox(iid, f"#{action_col_index}")
+                if bbox:
+                    x, y, w, h = bbox
+                    frame.place(x=x+2, y=y+1, width=w-4, height=h-2)
+                    frame.lift()
+                else:
+                    frame.place_forget()
+            except Exception:
+                continue
+        self.action_overlays = treemap
+
+    def _reposition_action_overlays(self, event=None):
+        cols = list(self.customer_tree['columns'])
+        if 'Action' not in cols:
+            return
+        action_col_index = cols.index('Action') + 1
+        all_iids = list(self.customer_tree.get_children())
+        for iid, frame in list(self.action_overlays.items()):
+            if iid not in all_iids:
+                try:
+                    frame.destroy()
+                except Exception:
+                    pass
+                del self.action_overlays[iid]
+                continue
+            bbox = self.customer_tree.bbox(iid, f"#{action_col_index}")
+            if not bbox:
+                try:
+                    frame.place_forget()
+                except Exception:
+                    pass
+            else:
+                x, y, w, h = bbox
+                try:
+                    frame.place(x=x+2, y=y+1, width=w-4, height=h-2)
+                    frame.lift()
+                except Exception:
+                    pass
+
+    def open_edit_window(self, iid):
+        import db
+        from tkinter import messagebox
+        cid = int(iid)
+        rec = db.get_customer_details(cid)
+        if not rec:
+            messagebox.showerror('Error', 'Customer not found')
+            return
+        edit_win = tk.Toplevel(self)
+        edit_win.title(f"Edit Customer {cid}")
+        edit_win.geometry("420x360")
+        edit_win.grab_set()
+        edit_win.rowconfigure(0, weight=1); edit_win.columnconfigure(0, weight=1)
+
+        form = tk.Frame(edit_win, padx=12, pady=12)
+        form.grid(row=0, column=0, sticky='nsew')
+        form.columnconfigure(1, weight=1)
+
+        tk.Label(form, text='First Name:').grid(row=0, column=0, sticky='w')
+        e_first = tk.Entry(form); e_first.grid(row=0, column=1, sticky='ew'); e_first.insert(0, rec['First_Name'])
+        tk.Label(form, text='Last Name:').grid(row=1, column=0, sticky='w')
+        e_last = tk.Entry(form); e_last.grid(row=1, column=1, sticky='ew'); e_last.insert(0, rec['Last_Name'])
+        tk.Label(form, text='Phone:').grid(row=2, column=0, sticky='w')
+        e_phone = tk.Entry(form); e_phone.grid(row=2, column=1, sticky='ew'); e_phone.insert(0, rec['Phone_Number'])
+        tk.Label(form, text='Email:').grid(row=3, column=0, sticky='w')
+        e_email = tk.Entry(form); e_email.grid(row=3, column=1, sticky='ew'); e_email.insert(0, rec.get('Email','') or '')
+        tk.Label(form, text='Address:').grid(row=4, column=0, sticky='nw')
+        e_addr = tk.Text(form, height=4); e_addr.grid(row=4, column=1, sticky='ew'); e_addr.insert('1.0', rec.get('Address','') or '')
+
+        def save_changes():
+            try:
+                db.update_customer(cid, e_first.get().strip(), e_last.get().strip(), e_phone.get().strip(), e_email.get().strip(), e_addr.get('1.0','end-1c').strip())
+                messagebox.showinfo('Saved', 'Customer updated')
+                edit_win.destroy()
+                self.refresh_customers()
+            except Exception as e:
+                messagebox.showerror('Error', str(e))
+
+        def do_delete():
+            try:
+                db.delete_customer(cid)
+                messagebox.showinfo('Deleted', 'Customer deleted')
+                edit_win.destroy()
+                self.refresh_customers()
+            except Exception as e:
+                messagebox.showerror('Error', str(e))
+
+        btnf = tk.Frame(form); btnf.grid(row=5, column=0, columnspan=2, pady=12); btnf.columnconfigure((0,1), weight=1)
+        tk.Button(btnf, text='Save', command=save_changes, bg=SECONDARY, fg='white').grid(row=0, column=0, sticky='ew', padx=6)
+        tk.Button(btnf, text='Delete', command=lambda: (messagebox.askyesno('Confirm','Delete customer?') and do_delete()), bg='#e74c3c', fg='white').grid(row=0, column=1, sticky='ew', padx=6)
 
 class ReportsPage(tk.Frame):
     def __init__(self, parent, controller):

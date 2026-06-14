@@ -636,9 +636,12 @@ def process_payment(order_id, amount_paid):
         }
 
 def create_or_get_customer(first_name, last_name, phone_number, email="", address=""):
-    """Create a new customer or get existing customer by phone number.
+    """Create or find an existing customer.
 
-    If phone_number is empty, always create a new customer (avoid treating empty phone as unique key).
+    Matching priority:
+    1. Phone number (if provided)
+    2. Exact match on first_name + last_name + address (trimmed)
+    3. Create new record
     """
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
@@ -650,7 +653,20 @@ def create_or_get_customer(first_name, last_name, phone_number, email="", addres
             if result:
                 return result[0]
 
-        # fallback: create a new customer record
+        # Try matching by exact name + address when phone not provided or not found
+        fn = (first_name or "").strip()
+        ln = (last_name or "").strip()
+        addr = (address or "").strip()
+        if fn or ln or addr:
+            cursor.execute(
+                "SELECT CustomerID FROM CUSTOMERS WHERE TRIM(First_Name)=? AND TRIM(Last_Name)=? AND TRIM(Address)=?",
+                (fn, ln, addr)
+            )
+            res = cursor.fetchone()
+            if res:
+                return res[0]
+
+        # create new customer record
         cursor.execute(
             "INSERT INTO CUSTOMERS (First_Name, Last_Name, Phone_Number, Email, Address) VALUES (?, ?, ?, ?, ?)",
             (first_name, last_name, phone, email, address)
@@ -834,6 +850,31 @@ def update_customer(customer_id, first_name, last_name, phone_number, email="", 
             "UPDATE CUSTOMERS SET First_Name = ?, Last_Name = ?, Phone_Number = ?, Email = ?, Address = ? WHERE CustomerID = ?",
             (first_name, last_name, phone_number, email, address, customer_id)
         )
+        conn.commit()
+        return True
+
+
+def get_customers():
+    """Return list of all customers as sqlite3.Row objects"""
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT CustomerID, First_Name, Last_Name, Phone_Number, Email, Address FROM CUSTOMERS ORDER BY First_Name, Last_Name")
+        return cursor.fetchall()
+
+
+def get_customer_details(customer_id):
+    with sqlite3.connect("Laundrify.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT CustomerID, First_Name, Last_Name, Phone_Number, Email, Address FROM CUSTOMERS WHERE CustomerID = ?", (customer_id,))
+        return cursor.fetchone()
+
+
+def delete_customer(customer_id):
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM CUSTOMERS WHERE CustomerID = ?", (customer_id,))
         conn.commit()
         return True
 
