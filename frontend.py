@@ -53,6 +53,260 @@ def reload_services_for_page(page):
     except Exception:
         pass
 
+class ScrollableGridTable(tk.Frame):
+    def __init__(self, parent, columns, include_action=True, edit_callback=None, delete_callback=None, double_click_callback=None):
+        super().__init__(parent, bg=PRIMARY)
+        self.columns = columns
+        self.include_action = include_action
+        self.edit_callback = edit_callback
+        self.delete_callback = delete_callback
+        self.double_click_callback = double_click_callback
+        
+        self.alignments = {}
+        self.widths = {}
+        for c in columns:
+            if c in ("Qty/Wt", "Total", "OrderID", "ID", "Total Revenue"):
+                self.alignments[c] = "e"
+                self.widths[c] = 12
+            elif c in ("Action", "Rank", "Total Orders"):
+                self.alignments[c] = "center"
+                self.widths[c] = 15
+            elif c in ("Status", "Paid", "Date Received"):
+                self.alignments[c] = "w"
+                self.widths[c] = 15
+            elif c == "Service":
+                self.alignments[c] = "w"
+                self.widths[c] = 20
+            else:
+                self.alignments[c] = "w"
+                self.widths[c] = 20
+
+        self.canvas = tk.Canvas(self, bg=PRIMARY, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        
+        # Grid frame container with dark background for 1px gridlines
+        self.grid_frame = tk.Frame(self.canvas, bg="#cccccc") 
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.grid_frame, anchor="nw")
+        
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        
+        self.canvas.bind('<Configure>', self._on_canvas_configure)
+        self.grid_frame.bind('<Configure>', self._on_frame_configure)
+        
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        
+        self.rows = {} # iid -> dict
+        self.row_order = [] # list of iids in order
+        self.current_row_idx = 1
+        
+        self.selected_iids = []
+        
+        self._build_headers()
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
+        
+    def _on_frame_configure(self, event):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def _build_headers(self):
+        for col_idx, col_name in enumerate(self.columns):
+            anchor = "w"
+            lbl = tk.Label(self.grid_frame, text=col_name, font=("Arial", 11, "bold"), fg="#4A6FA5", bg="#ffffff", anchor=anchor, padx=12, pady=6, width=self.widths.get(col_name, 15))
+            lbl.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            if col_name in ("Customer", "Service", "First Name", "Last Name", "Address", "Email"):
+                self.grid_frame.columnconfigure(col_idx, weight=1)
+
+    def get_children(self, parent=''):
+        if not parent:
+            return [iid for iid, r in self.rows.items() if not r.get('parent_iid')]
+        else:
+            return [iid for iid, r in self.rows.items() if r.get('parent_iid') == parent]
+
+    def delete(self, iid):
+        if iid in self.rows:
+            children = self.get_children(iid)
+            for c in children:
+                self.delete(c)
+            
+            row_data = self.rows.pop(iid)
+            for w in row_data['widgets']:
+                w.destroy()
+            if iid in self.row_order:
+                self.row_order.remove(iid)
+            if iid in self.selected_iids:
+                self.selected_iids.remove(iid)
+
+    def clear_all(self):
+        for iid in list(self.rows.keys()):
+            self.delete(iid)
+
+    def insert(self, parent, index, iid, text='', values=(), tags=(), open=False):
+        row_idx = self.current_row_idx
+        self.current_row_idx += 1
+        
+        bg_color = "#ffffff"
+        text_color = "#2c3e50"
+        font_config = ("Arial", 11)
+        
+        if 'evenrow' in tags:
+            bg_color = "#f8f9fa"
+            
+        if 'child_service' in tags:
+            bg_color = "#d2e3fc" # distinct light-blue background highlight across entire child row
+            
+        if 'top1' in tags:
+            bg_color = "#ffeaa7"
+            font_config = ("Arial", 11, "bold")
+        elif 'top2' in tags:
+            bg_color = "#dfe6e9"
+            font_config = ("Arial", 11, "bold")
+        elif 'top3' in tags:
+            bg_color = "#fab1a0"
+            font_config = ("Arial", 11, "bold")
+            
+        row_data = {
+            'iid': iid,
+            'parent_iid': parent if parent else None,
+            'widgets': [],
+            'open': open,
+            'bg_color': bg_color,
+            'tags': tags
+        }
+        
+        for col_idx, col_name in enumerate(self.columns):
+            cell_frame = tk.Frame(self.grid_frame, bg=bg_color)
+            cell_frame.grid(row=row_idx, column=col_idx, sticky="nsew", padx=1, pady=1)
+            row_data['widgets'].append(cell_frame)
+            
+            cell_frame.bind("<Button-1>", lambda e, i=iid: self._on_row_click(i))
+            
+            if col_name == "Action":
+                has_children = 'parent_mixed' in tags
+                
+                if self.delete_callback:
+                    btn_del = tk.Button(cell_frame, text='Delete', fg='#e74c3c', bg=bg_color, activebackground=bg_color, activeforeground='#c0392b', cursor='hand2', bd=0, command=lambda i=iid: self.delete_callback(i))
+                    btn_del.pack(side='right', padx=(10, 40))
+                
+                if self.edit_callback and not has_children:
+                    btn_edit = tk.Button(cell_frame, text='Edit', fg='#0563c1', bg=bg_color, activebackground=bg_color, activeforeground='#044280', cursor='hand2', bd=0, command=lambda i=iid: self.edit_callback(i))
+                    if self.delete_callback:
+                        btn_edit.pack(side='right', padx=(10, 15)) # Extra space between Edit and Delete
+                    else:
+                        btn_edit.pack(expand=True) # Center if only edit button is present
+            else:
+                if col_idx == 0:
+                    val = text
+                else:
+                    v_idx = col_idx - 1
+                    val = values[v_idx] if v_idx < len(values) else ""
+                    
+                anchor = self.alignments.get(col_name, "w")
+                
+                # Expand toggle in the first column for parent_mixed
+                if col_name == self.columns[0] and 'parent_mixed' in tags:
+                    # Create an inner frame to hold toggle + label
+                    inner_frame = tk.Frame(cell_frame, bg=bg_color)
+                    inner_frame.pack(side="left" if anchor == "w" else "right", fill="both", expand=True, padx=4, pady=8)
+                    
+                    btn_toggle = tk.Label(inner_frame, text="▼" if open else "▶", font=("Arial", 10), fg="#4A6FA5", bg=bg_color, cursor='hand2')
+                    btn_toggle.pack(side="left", padx=(0, 4))
+                    btn_toggle.bind("<Button-1>", lambda e, i=iid: self.toggle_expand(i))
+                    row_data['toggle_btn'] = btn_toggle
+                    
+                    lbl = tk.Label(inner_frame, text=val, font=font_config, fg=text_color, bg=bg_color, anchor=anchor)
+                    lbl.pack(side="left" if anchor == "w" else "right", fill="both", expand=True)
+                    lbl.bind("<Button-1>", lambda e, i=iid: self._on_row_click(i))
+                    if self.double_click_callback:
+                        lbl.bind("<Double-1>", lambda e, i=iid: self.double_click_callback(i))
+                        inner_frame.bind("<Double-1>", lambda e, i=iid: self.double_click_callback(i))
+                        cell_frame.bind("<Double-1>", lambda e, i=iid: self.double_click_callback(i))
+                else:
+                    lbl = tk.Label(cell_frame, text=val, font=font_config, fg=text_color, bg=bg_color, anchor=anchor)
+                    lbl.pack(side="left" if anchor == "w" else "right", fill="both", expand=True, padx=4, pady=8)
+                    lbl.bind("<Button-1>", lambda e, i=iid: self._on_row_click(i))
+                    if self.double_click_callback:
+                        lbl.bind("<Double-1>", lambda e, i=iid: self.double_click_callback(i))
+                        cell_frame.bind("<Double-1>", lambda e, i=iid: self.double_click_callback(i))
+
+        self.rows[iid] = row_data
+        self.row_order.append(iid)
+        
+        if parent:
+            parent_data = self.rows.get(parent)
+            if parent_data and not parent_data['open']:
+                for w in row_data['widgets']:
+                    w.grid_remove()
+
+    def toggle_expand(self, iid):
+        row_data = self.rows.get(iid)
+        if not row_data: return
+        is_open = not row_data['open']
+        row_data['open'] = is_open
+        if 'toggle_btn' in row_data:
+            row_data['toggle_btn'].config(text="▼" if is_open else "▶")
+            
+        children = self.get_children(iid)
+        for child_iid in children:
+            child_data = self.rows[child_iid]
+            if is_open:
+                for w in child_data['widgets']:
+                    w.grid()
+            else:
+                for w in child_data['widgets']:
+                    w.grid_remove()
+
+    def item(self, iid, open=None):
+        row_data = self.rows.get(iid)
+        if not row_data: return {}
+        if open is not None and row_data['open'] != open:
+            self.toggle_expand(iid)
+        return {'open': row_data['open']}
+
+    def _on_row_click(self, iid):
+        self.selection_set([iid])
+
+    def selection(self):
+        return self.selected_iids
+
+    def selection_set(self, iids):
+        for old_iid in self.selected_iids:
+            if old_iid in self.rows:
+                row_data = self.rows[old_iid]
+                for w in row_data['widgets']:
+                    w.config(bg=row_data['bg_color'])
+                    for child in w.winfo_children():
+                        child.config(bg=row_data['bg_color'])
+                        
+        self.selected_iids = list(iids)
+        
+        sel_bg = "#ACC8E5"
+        for new_iid in self.selected_iids:
+            if new_iid in self.rows:
+                row_data = self.rows[new_iid]
+                for w in row_data['widgets']:
+                    w.config(bg=sel_bg)
+                    for child in w.winfo_children():
+                        child.config(bg=sel_bg)
+
+    def see(self, iid):
+        if iid in self.rows:
+            row_data = self.rows[iid]
+            w = row_data['widgets'][0]
+            y = w.winfo_y()
+            # Simple scroll
+            try:
+                self.canvas.yview_moveto(y / self.grid_frame.winfo_height())
+            except Exception:
+                pass
+
+
 class App(tk.Frame):
     def __init__(self, parent, show_header=True, backend=None, title_callback=None):
         super().__init__(parent)
@@ -246,11 +500,11 @@ class NewOrderPage(tk.Frame):
         self.notes_text.grid(row=8, column=1, sticky="ew", ipady=3)
 
         add_btn = tk.Button(left, text="Add Item", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.add_item, width=20)
-        add_btn.grid(row=9, column=0, columnspan=2, pady=10)
+        add_btn.grid(row=9, column=1, pady=10)
 
         # Lookup existing customer and autofill fields
         lookup_btn = tk.Button(left, text="Lookup Customer", font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, command=self.lookup_customer, width=20)
-        lookup_btn.grid(row=10, column=0, columnspan=2, pady=(0,10))
+        lookup_btn.grid(row=10, column=1, pady=(0,10))
 
         # right - instructions and order items area
         # header with Instruction label and gear button on same row
@@ -328,18 +582,19 @@ class NewOrderPage(tk.Frame):
         # Otherwise show a selection window with treeview to pick a customer
         sel_win = tk.Toplevel(self)
         sel_win.title('Select Customer')
-        sel_win.geometry('760x360')
+        sel_win.geometry('1100x550')
+        sel_win.configure(bg=PRIMARY)
         sel_win.grab_set()
         sel_win.rowconfigure(1, weight=1); sel_win.columnconfigure(0, weight=1)
 
         # search row
-        top = tk.Frame(sel_win, padx=8, pady=6)
+        top = tk.Frame(sel_win, padx=8, pady=6, bg=PRIMARY)
         top.grid(row=0, column=0, sticky='ew')
         top.columnconfigure((1,3), weight=1)
-        tk.Label(top, text='First Name:', font=TTL_TEXT).grid(row=0, column=0, sticky='w')
+        tk.Label(top, text='First Name:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w')
         entry_first = tk.Entry(top, font=REG_TEXT)
         entry_first.grid(row=0, column=1, sticky='ew', padx=6)
-        tk.Label(top, text='Last Name:', font=TTL_TEXT).grid(row=0, column=2, sticky='w', padx=(12,6))
+        tk.Label(top, text='Last Name:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=2, sticky='w', padx=(12,6))
         entry_last = tk.Entry(top, font=REG_TEXT)
         entry_last.grid(row=0, column=3, sticky='ew')
         tk.Button(top, text='Search', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=lambda: populate_filtered()).grid(row=0, column=4, padx=8)
@@ -354,25 +609,31 @@ class NewOrderPage(tk.Frame):
         entry_last.bind('<KeyRelease>', check_lookup_empty)
 
         # container for tree
-        container = tk.Frame(sel_win, padx=8, pady=6)
+        container = tk.Frame(sel_win, padx=8, pady=6, bg=PRIMARY)
         container.grid(row=1, column=0, sticky='nsew')
         container.rowconfigure(0, weight=1); container.columnconfigure(0, weight=1)
 
         cols = ('ID','First Name','Last Name','Phone','Email','Address')
-        tree = ttk.Treeview(container, columns=cols, show='headings', style="Fun.Treeview")
-        tree.tag_configure("evenrow", background="#f8f9fa")
-        tree.tag_configure("oddrow", background="#ffffff")
-        for c in cols:
-            tree.heading(c, text=c)
-            tree.column(c, width=110 if c!='Address' else 220, anchor='w')
+        
+        def _on_double(iid):
+            cid = int(iid)
+            import db as _db
+            rec = _db.get_customer_details(cid)
+            if rec:
+                rd = dict(rec)
+                self.first_name_entry.delete(0, tk.END); self.first_name_entry.insert(0, rd.get('First_Name',''))
+                self.last_name_entry.delete(0, tk.END); self.last_name_entry.insert(0, rd.get('Last_Name',''))
+                self.address_entry.delete(0, tk.END); self.address_entry.insert(0, rd.get('Address','') or '')
+                self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rd.get('Email','') or '')
+                self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rd.get('Phone_Number','') or '')
+                self.update_customer_number(rd.get('CustomerID'))
+            sel_win.destroy()
+            
+        tree = ScrollableGridTable(container, cols, include_action=False, double_click_callback=_on_double)
         tree.grid(row=0, column=0, sticky='nsew')
-        scrollbar = ttk.Scrollbar(container, command=tree.yview)
-        scrollbar.grid(row=0, column=1, sticky='ns')
-        tree.configure(yscrollcommand=scrollbar.set)
 
         def populate(customers=None):
-            for i in tree.get_children():
-                tree.delete(i)
+            tree.clear_all()
             import db as _db
             try:
                 rows = customers if customers is not None else _db.get_customers()
@@ -381,7 +642,8 @@ class NewOrderPage(tk.Frame):
             for r in rows:
                 rr = dict(r)
                 tag = "evenrow" if len(tree.get_children()) % 2 == 0 else "oddrow"
-                tree.insert('', 'end', iid=str(rr.get('CustomerID')), values=(rr.get('CustomerID'), rr.get('First_Name',''), rr.get('Last_Name',''), rr.get('Phone_Number',''), rr.get('Email',''), rr.get('Address','')), tags=(tag,))
+                vals = (rr.get('First_Name',''), rr.get('Last_Name',''), rr.get('Phone_Number',''), rr.get('Email',''), rr.get('Address',''))
+                tree.insert('', 'end', iid=str(rr.get('CustomerID')), text=str(rr.get('CustomerID')), values=vals, tags=(tag,))
 
         def populate_filtered():
             f = entry_first.get().strip().lower()
@@ -401,26 +663,10 @@ class NewOrderPage(tk.Frame):
                 res.append(c)
             populate(res)
 
-        def _on_double(e):
-            sel = tree.selection()
-            if not sel: return
-            cid = int(sel[0])
-            import db as _db
-            rec = _db.get_customer_details(cid)
-            if rec:
-                rd = dict(rec)
-                self.first_name_entry.delete(0, tk.END); self.first_name_entry.insert(0, rd.get('First_Name',''))
-                self.last_name_entry.delete(0, tk.END); self.last_name_entry.insert(0, rd.get('Last_Name',''))
-                self.address_entry.delete(0, tk.END); self.address_entry.insert(0, rd.get('Address','') or '')
-                self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rd.get('Email','') or '')
-                self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rd.get('Phone_Number','') or '')
-                self.update_customer_number(rd.get('CustomerID'))
-            sel_win.destroy()
-
-        tree.bind('<Double-1>', _on_double)
+        # _on_double is already defined above and passed to ScrollableGridTable
 
         def _select():
-            sel = tree.selection()
+            sel = tree.selected_iids
             if not sel: return
             cid = int(sel[0])
             import db as _db
@@ -435,7 +681,7 @@ class NewOrderPage(tk.Frame):
                 self.update_customer_number(rd.get('CustomerID'))
             sel_win.destroy()
 
-        btnf = tk.Frame(sel_win)
+        btnf = tk.Frame(sel_win, bg=PRIMARY)
         btnf.grid(row=2, column=0, pady=8, sticky='ew')
         btnf.columnconfigure((0,1,2), weight=1)
         tk.Button(btnf, text='Select', command=_select, bg=SECONDARY, fg='white').grid(row=0, column=0, sticky='ew', padx=6)
@@ -622,6 +868,7 @@ class NewOrderPage(tk.Frame):
         price_entry.grid(row=2, column=1, sticky='ew', pady=3, ipady=2)
 
         large_lbl = tk.Label(form, text='Large Price (₱):', font=TTL_TEXT, bg=PRIMARY)
+        large_lbl.grid(row=2, column=0, sticky='w', pady=3)
         large_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
 
         # Track the selected service name for the delete button label
@@ -1127,51 +1374,16 @@ class ViewOrderPage(tk.Frame):
         # helper to create tree (optionally include Action column)
         def make_tree(parent, include_action=True):
             cols = list(all_columns)
-            if 'OrderID' in cols:
-                cols.remove('OrderID')
             if include_action:
                 cols.append('Action')
-            frame = tk.Frame(parent)
-            frame.pack(fill='both', expand=True)
-            scrollbar = ttk.Scrollbar(frame)
-            scrollbar.pack(side='right', fill='y')
-            tree = ttk.Treeview(frame, columns=cols, show="tree headings", yscrollcommand=scrollbar.set, style="Fun.Treeview")
-            tree.tag_configure("evenrow", background="#f8f9fa")
-            tree.tag_configure("oddrow", background="#ffffff")
-            # keep a reference to scrollbar so we can bind its events later
-            tree._scrollbar = scrollbar
-            scrollbar.config(command=tree.yview)
             
-            # Configure #0 column as OrderID
-            tree.heading('#0', text='OrderID')
-            tree.column('#0', width=100, anchor='w')
-            
-            for col in cols:
-                tree.heading(col, text=col)
-                tree.column(col, width=120 if col not in ('Action', 'Qty/Wt') else (110 if col == 'Action' else 80), anchor='w')
-
+            tree = ScrollableGridTable(parent, cols, include_action=include_action, edit_callback=self.open_edit_window, delete_callback=self.confirm_delete_order)
             tree.pack(fill='both', expand=True)
             return tree
 
         self.unpaid_tree = make_tree(self.unpaid_frame, include_action=True)
         self.paid_tree = make_tree(self.paid_frame, include_action=True)
         self.archived_tree = make_tree(self.archived_frame, include_action=False)
-
-        # bind click & reposition handlers to trees that have Action column
-        for t in (self.unpaid_tree, self.paid_tree):
-            t.bind('<Motion>', self.on_tree_motion)
-            # reposition overlays on configure, mouse actions and after scroll (add handlers so original click binding isn't replaced)
-            t.bind('<Configure>', lambda e: self._reposition_action_overlays(e), add='+')
-            t.bind('<ButtonRelease-1>', lambda e: self._reposition_action_overlays(e), add='+')
-            t.bind('<MouseWheel>', lambda e: self._reposition_action_overlays(e), add='+')
-            t.bind('<<TreeviewOpen>>', lambda e: self._reposition_action_overlays(e), add='+')
-            t.bind('<<TreeviewClose>>', lambda e: self._reposition_action_overlays(e), add='+')
-            try:
-                # scrollbar exists as attribute _scrollbar
-                t._scrollbar.bind('<ButtonRelease-1>', lambda e: self._reposition_action_overlays(e), add='+')
-                t._scrollbar.bind('<B1-Motion>', lambda e: self._reposition_action_overlays(e), add='+')
-            except Exception:
-                pass
 
         # Legend/Filter at bottom (moved below the notebook)
         legend_frame = tk.Frame(main_frame, bg=PRIMARY)
@@ -1215,25 +1427,9 @@ class ViewOrderPage(tk.Frame):
         else:
             return self.archived_tree
 
-    # --- Action overlay helpers (show blue underlined 'Edit' only over Action cell) ---
+    # --- Action overlays (REMOVED: Now handled by CustomGridTable directly) ---
     def _clear_action_overlays(self, tree=None):
-        # clear overlays for a specific tree or all
-        if tree is None:
-            for treemap in list(self.action_overlays.values()):
-                for w in list(treemap.values()):
-                    try:
-                        w.destroy()
-                    except Exception:
-                        pass
-            self.action_overlays = {}
-            return
-        treemap = self.action_overlays.get(tree, {})
-        for w in list(treemap.values()):
-            try:
-                w.destroy()
-            except Exception:
-                pass
-        self.action_overlays[tree] = {}
+        pass
 
     def _order_id_from_iid(self, iid):
         """Extract numeric order_id from an iid that may be '42', '42-1', or '42-total'."""
@@ -1276,97 +1472,10 @@ class ViewOrderPage(tk.Frame):
                     messagebox.showerror("Error", str(e))
 
     def _create_action_overlays(self, tree):
-        # create Label widgets positioned over the Action column cells (per-tree).
-        # Place Edit overlays on all parent and child rows representing an order or service.
-        self._clear_action_overlays(tree)
-        cols = list(tree['columns'])
-        if 'Action' not in cols:
-            return
-        action_col_index = cols.index('Action') + 1
-        treemap = {}
-
-        def get_all_items(parent=''):
-            items = []
-            for item in tree.get_children(parent):
-                items.append(item)
-                items.extend(get_all_items(item))
-            return items
-
-        all_iids = get_all_items()
-
-        for iid in all_iids:
-            order_id = self._order_id_from_iid(iid)
-            if order_id is None:
-                continue
-            try:
-                frame = tk.Frame(tree, bg='white')
-                has_children = len(tree.get_children(iid)) > 0
-                if has_children:
-                    dummy = tk.Button(frame, text='Edit', fg='white', bg='white', activebackground='white', activeforeground='white', bd=0, highlightthickness=0, state='disabled', disabledforeground='white')
-                    dummy.pack(side='left', padx=4, expand=True)
-                    del_btn = tk.Button(frame, text='Delete', fg='#e74c3c', cursor='hand2', bd=0, command=lambda target_iid=iid: self.confirm_delete_order(target_iid))
-                    del_btn.pack(side='left', padx=4, expand=True)
-                else:
-                    edit_btn = tk.Button(frame, text='Edit', fg='#0563c1', cursor='hand2', bd=0, command=lambda target_iid=iid: self.open_edit_window(target_iid))
-                    edit_btn.pack(side='left', padx=4, expand=True)
-                    del_btn = tk.Button(frame, text='Delete', fg='#e74c3c', cursor='hand2', bd=0, command=lambda target_iid=iid: self.confirm_delete_order(target_iid))
-                    del_btn.pack(side='left', padx=4, expand=True)
-                treemap[iid] = frame
-
-                bbox = tree.bbox(iid, f"#{action_col_index}")
-                if bbox:
-                    x, y, w, h = bbox
-                    frame.place(x=x+2, y=y+1, width=w-4, height=h-2)
-                    frame.lift()
-                else:
-                    frame.place_forget()
-            except Exception:
-                continue
-        self.action_overlays[tree] = treemap
+        pass
 
     def _reposition_action_overlays(self, event=None):
-        # reposition existing overlays (call on configure/scroll/expand/collapse)
-        for tree in (self.unpaid_tree, self.paid_tree):
-            treemap = self.action_overlays.get(tree, {})
-            cols = list(tree['columns'])
-            if 'Action' not in cols:
-                continue
-            action_col_index = cols.index('Action') + 1
-
-            def get_all_items(parent=''):
-                items = []
-                for item in tree.get_children(parent):
-                    items.append(item)
-                    items.extend(get_all_items(item))
-                return items
-
-            all_iids = set(get_all_items())
-
-            for iid, lbl in list(treemap.items()):
-                if iid not in all_iids:
-                    try:
-                        lbl.destroy()
-                    except Exception:
-                        pass
-                    del treemap[iid]
-                    continue
-                bbox = tree.bbox(iid, f"#{action_col_index}")
-                if not bbox:
-                    try:
-                        lbl.place_forget()
-                    except Exception:
-                        pass
-                else:
-                    x, y, w, h = bbox
-                    try:
-                        lbl.place(x=x+2, y=y+1, width=w-4, height=h-2)
-                        lbl.lift()
-                    except Exception:
-                        pass
-        # cleanup empty maps
-        for tree in list(self.action_overlays.keys()):
-            if not self.action_overlays.get(tree):
-                del self.action_overlays[tree]
+        pass
 
     def _insert_order_rows(self, tree, order, include_action=True):
         """Insert a collapsible parent row with individual service child rows for mixed orders.
@@ -1452,40 +1561,29 @@ class ViewOrderPage(tk.Frame):
     def refresh_unpaid(self):
         import db
         tree = self.unpaid_tree
-        for item in tree.get_children():
-            tree.delete(item)
+        tree.clear_all()
         try:
             orders = db.get_unpaid_orders()
             for order in orders:
                 self._insert_order_rows(tree, order, include_action=True)
-            try:
-                self._create_action_overlays(tree)
-            except Exception:
-                pass
         except Exception as e:
             print(f"Error loading unpaid orders: {e}")
 
     def refresh_paid(self):
         import db
         tree = self.paid_tree
-        for item in tree.get_children():
-            tree.delete(item)
+        tree.clear_all()
         try:
             orders = db.get_paid_orders()
             for order in orders:
                 self._insert_order_rows(tree, order, include_action=True)
-            try:
-                self._create_action_overlays(tree)
-            except Exception:
-                pass
         except Exception as e:
             print(f"Error loading paid orders: {e}")
 
     def refresh_archived(self):
         import db
         tree = self.archived_tree
-        for item in tree.get_children():
-            tree.delete(item)
+        tree.clear_all()
         try:
             orders = db.get_archived_orders()
             for order in orders:
@@ -1510,8 +1608,7 @@ class ViewOrderPage(tk.Frame):
             orders = db.get_archived_orders()
             tree = self.archived_tree
 
-        for item in tree.get_children():
-            tree.delete(item)
+        tree.clear_all()
 
         found = False
         matching_iids = []
@@ -1556,13 +1653,6 @@ class ViewOrderPage(tk.Frame):
                     tree.item(str(oid), open=True)
                     matching_iids.extend(matched_child_iids)
 
-        try:
-            if idx in (0, 1):
-                self._create_action_overlays(tree)
-        except Exception:
-            pass
-
-        # Select and scroll to the matched child items
         if matching_iids:
             try:
                 tree.selection_set(matching_iids)
@@ -1615,16 +1705,10 @@ class ViewOrderPage(tk.Frame):
         except Exception as e:
             messagebox.showerror('Date Search', f'Database error: {e}')
             return
-        for item in tree.get_children():
-            tree.delete(item)
+        tree.clear_all()
         include_action = (idx in (0, 1))
         for order in orders:
             self._insert_order_rows(tree, order, include_action=include_action)
-        try:
-            if idx in (0, 1):
-                self._create_action_overlays(tree)
-        except Exception:
-            pass
 
     def sort_by_status(self, status):
         idx = self.notebook.index(self.notebook.select())
@@ -1639,8 +1723,7 @@ class ViewOrderPage(tk.Frame):
             tree = self.archived_tree
             orders = db.get_archived_orders()
 
-        for item in tree.get_children():
-            tree.delete(item)
+        tree.clear_all()
 
         if status == 'All':
             if idx == 0:
@@ -1656,11 +1739,6 @@ class ViewOrderPage(tk.Frame):
             include_action = (idx in (0, 1))
             for order in orders:
                 self._insert_order_rows(tree, order, include_action=include_action)
-            try:
-                if idx in (0, 1):
-                    self._create_action_overlays(tree)
-            except Exception:
-                pass
         except Exception as e:
             print(f"Error sorting orders: {e}")
 
@@ -1848,31 +1926,10 @@ class ViewOrderPage(tk.Frame):
         tk.Button(btn_frame, text="Cancel", command=payment_win.destroy, font=REG_TEXT, bg=ACCENT, fg=SECONDARY, height=2, cursor="hand2", bd=1, relief="raised").grid(row=0, column=1, sticky="ew", padx=5)
 
     def on_tree_motion(self, event):
-        widget = event.widget
-        col = widget.identify_column(event.x)
-        # change cursor to hand when over Action column
-        if col == f"#{len(widget['columns'])}":
-            widget.configure(cursor='hand2')
-        else:
-            widget.configure(cursor='')
+        pass
 
     def on_tree_click(self, event):
-        """Detect clicks on the 'Action' column and open edit window"""
-        widget = event.widget
-        col = widget.identify_column(event.x)
-        if col == f"#{len(widget['columns'])}":
-            row_id = widget.identify_row(event.y)
-            if not row_id:
-                return
-            s = str(row_id)
-            if s.endswith('-total') or s.endswith('-0'):
-                return
-            if '-' not in s:
-                # Parent row: check if it's mixed services parent (has children in tree)
-                # If so, do not open edit window because mixed parent has no edit button
-                if len(widget.get_children(s)) > 0:
-                    return
-            self.open_edit_window(row_id)
+        pass
 
     #FOR VIEW ORDER PAGE
     def open_edit_window(self, target_id):
@@ -2088,33 +2145,9 @@ class CustomersPage(tk.Frame):
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
 
-        scrollbar = ttk.Scrollbar(table_frame)
-        scrollbar.grid(row=0, column=1, sticky='ns')
-
-        cols = ("First Name", "Last Name", "Phone", "Email", "Address", "Action")
-        self.customer_tree = ttk.Treeview(table_frame, columns=cols, show="tree headings", yscrollcommand=scrollbar.set, style="Fun.Treeview")
-        self.customer_tree.tag_configure("evenrow", background="#f8f9fa")
-        self.customer_tree.tag_configure("oddrow", background="#ffffff")
-        self.customer_tree._scrollbar = scrollbar
-        scrollbar.config(command=self.customer_tree.yview)
-
-        self.customer_tree.heading('#0', text='ID')
-        self.customer_tree.column('#0', width=80, anchor='w')
-        for col in cols:
-            self.customer_tree.heading(col, text=col)
-            self.customer_tree.column(col, width=140 if col != 'Action' else 120, anchor='w')
-
+        cols = ("ID", "First Name", "Last Name", "Phone", "Email", "Address", "Action")
+        self.customer_tree = ScrollableGridTable(table_frame, cols, include_action=True, edit_callback=self.open_edit_window, delete_callback=None)
         self.customer_tree.grid(row=0, column=0, sticky='nsew')
-
-        # bind events
-        self.customer_tree.bind('<Configure>', lambda e: self._reposition_action_overlays(e), add='+')
-        self.customer_tree.bind('<ButtonRelease-1>', lambda e: self._reposition_action_overlays(e), add='+')
-        self.customer_tree.bind('<Motion>', lambda e: self._reposition_action_overlays(e), add='+')
-        try:
-            self.customer_tree._scrollbar.bind('<ButtonRelease-1>', lambda e: self._reposition_action_overlays(e), add='+')
-            self.customer_tree._scrollbar.bind('<B1-Motion>', lambda e: self._reposition_action_overlays(e), add='+')
-        except Exception:
-            pass
 
         # Sort buttons at bottom
         sort_frame = tk.Frame(main_frame, bg=PRIMARY)
@@ -2128,9 +2161,7 @@ class CustomersPage(tk.Frame):
 
     def refresh_customers(self, customers_list=None):
         import db
-        # populate tree with provided list or all
-        for item in self.customer_tree.get_children():
-            self.customer_tree.delete(item)
+        self.customer_tree.clear_all()
         try:
             customers = customers_list if customers_list is not None else db.get_customers()
         except Exception:
@@ -2144,10 +2175,6 @@ class CustomersPage(tk.Frame):
         try:
             cnt = len(customers)
             self.count_label.config(text=f'There are {cnt} Customer Records')
-        except Exception:
-            pass
-        try:
-            self._create_action_overlays()
         except Exception:
             pass
 
@@ -2224,64 +2251,13 @@ class CustomersPage(tk.Frame):
                 messagebox.showerror('Error', str(e))
 
     def _clear_action_overlays(self):
-        for w in list(self.action_overlays.values()):
-            try:
-                w.destroy()
-            except Exception:
-                pass
-        self.action_overlays = {}
+        pass
 
     def _create_action_overlays(self):
-        self._clear_action_overlays()
-        cols = list(self.customer_tree['columns'])
-        if 'Action' not in cols:
-            return
-        action_col_index = cols.index('Action') + 1
-        treemap = {}
-        for iid in self.customer_tree.get_children():
-            try:
-                frame = tk.Frame(self.customer_tree, bg='white')
-                btn_edit = tk.Button(frame, text='Edit', fg='#0563c1', cursor='hand2', bd=0, command=lambda cid=iid: self.open_edit_window(cid))
-                btn_edit.pack(expand=True)
-                treemap[iid] = frame
-                bbox = self.customer_tree.bbox(iid, f"#{action_col_index}")
-                if bbox:
-                    x, y, w, h = bbox
-                    frame.place(x=x+2, y=y+1, width=w-4, height=h-2)
-                    frame.lift()
-                else:
-                    frame.place_forget()
-            except Exception:
-                continue
-        self.action_overlays = treemap
+        pass
 
     def _reposition_action_overlays(self, event=None):
-        cols = list(self.customer_tree['columns'])
-        if 'Action' not in cols:
-            return
-        action_col_index = cols.index('Action') + 1
-        all_iids = list(self.customer_tree.get_children())
-        for iid, frame in list(self.action_overlays.items()):
-            if iid not in all_iids:
-                try:
-                    frame.destroy()
-                except Exception:
-                    pass
-                del self.action_overlays[iid]
-                continue
-            bbox = self.customer_tree.bbox(iid, f"#{action_col_index}")
-            if not bbox:
-                try:
-                    frame.place_forget()
-                except Exception:
-                    pass
-            else:
-                x, y, w, h = bbox
-                try:
-                    frame.place(x=x+2, y=y+1, width=w-4, height=h-2)
-                    frame.lift()
-                except Exception:
-                    pass
+        pass
     
     #FOR CUSTOMER PAGE
     def open_edit_window(self, iid):
@@ -2371,6 +2347,9 @@ class ReportsPage(tk.Frame):
         
         self.canvas = None
         self.show_report("revenue")
+        
+    def refresh(self):
+        self.show_report(self.current_tab)
     
     def show_report(self, report_type):
         # Clear previous chart
@@ -2411,14 +2390,14 @@ class ReportsPage(tk.Frame):
             def build_tree(parent, data):
                 columns = ("rank", "name", "orders", "revenue")
                 tree = ttk.Treeview(parent, columns=columns, show="headings", height=10, style="Fun.Treeview")
-                tree.heading("rank", text="Rank")
-                tree.heading("name", text="Customer Name")
-                tree.heading("orders", text="Total Orders")
-                tree.heading("revenue", text="Total Revenue")
+                tree.heading("rank", text="  Rank", anchor="w")
+                tree.heading("name", text="  Customer Name", anchor="w")
+                tree.heading("orders", text="  Total Orders", anchor="w")
+                tree.heading("revenue", text="  Total Revenue", anchor="w")
                 
                 tree.column("rank", width=80, anchor="center")
                 tree.column("name", width=250, anchor="w")
-                tree.column("orders", width=120, anchor="center")
+                tree.column("orders", width=120, anchor="e")
                 tree.column("revenue", width=150, anchor="e")
                 
                 tree.tag_configure("evenrow", background="#f8f9fa")

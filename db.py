@@ -1096,6 +1096,7 @@ def get_top_customers_by_orders():
             SUM(O.Order_Total_Price) as total_spent
         FROM ORDERS O
         JOIN CUSTOMERS C ON O.CustomerID = C.CustomerID
+        WHERE O.Order_Payed_At IS NOT NULL
         GROUP BY C.CustomerID
         ORDER BY total_orders DESC, total_spent DESC
         LIMIT 10
@@ -1114,6 +1115,7 @@ def get_top_customers_by_revenue():
             SUM(O.Order_Total_Price) as total_spent
         FROM ORDERS O
         JOIN CUSTOMERS C ON O.CustomerID = C.CustomerID
+        WHERE O.Order_Payed_At IS NOT NULL
         GROUP BY C.CustomerID
         ORDER BY total_spent DESC, total_orders DESC
         LIMIT 10
