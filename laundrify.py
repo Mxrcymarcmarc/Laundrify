@@ -9,6 +9,39 @@ ACCENT = "#B8C5D6"
 HDR_TEXT = ("Cooper Black", 24)
 REG_TEXT = ("Arial", 12)
 
+
+def show_splash(root):
+    splash = tk.Toplevel()
+    splash.overrideredirect(True)
+    splash.configure(bg=PRIMARY)
+    splash.attributes('-topmost', True)
+    splash.lift()
+
+    content = tk.Frame(splash, bg=PRIMARY, bd=2, relief='ridge')
+    content.pack(expand=True, fill='both', padx=10, pady=10)
+
+    title_label = tk.Label(content, text="Laundrify", font=("Cooper Black", 32), bg=PRIMARY, fg=SECONDARY)
+    title_label.pack(pady=(24, 8))
+
+    subtitle_label = tk.Label(content, text="Preparing your experience...", font=("Arial", 14), bg=PRIMARY, fg=SECONDARY)
+    subtitle_label.pack(pady=(0, 18))
+
+    progress = ttk.Progressbar(content, mode='indeterminate', length=320)
+    progress.pack(pady=(0, 18))
+    progress.start(12)
+
+    width, height = 460, 220
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x = (screen_width - width) // 2
+    y = (screen_height - height) // 2
+    splash.geometry(f"{width}x{height}+{x}+{y}")
+    splash.update_idletasks()
+    splash.focus_force()
+
+    return splash
+
+
 def main():
     # Initialize database
     db.init_db()
@@ -19,33 +52,43 @@ def main():
     root.resizable(False, False)
     root.configure(bg=PRIMARY)
     
-    root.columnconfigure(0, weight=1)
-    root.columnconfigure(1, weight=1)
-    
-    page_title = "New Order"
-    
-    # Header bar
-    header_frame = tk.Frame(root, bg=SECONDARY)
-    header_frame.grid(row=0, column=0, columnspan=2, sticky='ew')
-    header_frame.columnconfigure(0, weight=1)
+    root.withdraw()
 
-    label_header = tk.Label(header_frame, text=f"Laundrify - {page_title}", font=HDR_TEXT, bg=SECONDARY, fg="white")
-    label_header.grid(row=0, column=0, sticky='ew', pady=18)
-    label_header.configure(anchor='center')
+    splash = show_splash(root)
 
-    # embed the frontend App into the existing root
-    import frontend
+    def start_app():
+        splash.destroy()
+        root.deiconify()
 
-    root.rowconfigure(0, weight=0)
-    root.rowconfigure(1, weight=0)
-    root.rowconfigure(2, weight=1)
-    def set_title(t):
-        label_header.config(text=t)
+        root.columnconfigure(0, weight=1)
+        root.columnconfigure(1, weight=1)
+        
+        page_title = "New Order"
+        
+        # Header bar
+        header_frame = tk.Frame(root, bg=SECONDARY)
+        header_frame.grid(row=0, column=0, columnspan=2, sticky='ew')
+        header_frame.columnconfigure(0, weight=1)
 
-    app = frontend.App(root, show_header=False, title_callback=set_title)
-    app.grid(row=2, column=0, columnspan=2, sticky='nsew')
-    app.configure(bg=PRIMARY)
+        label_header = tk.Label(header_frame, text=f"Laundrify - {page_title}", font=HDR_TEXT, bg=SECONDARY, fg="white")
+        label_header.grid(row=0, column=0, sticky='ew', pady=18)
+        label_header.configure(anchor='center')
 
+        # embed the frontend App into the existing root
+        import frontend
+
+        root.rowconfigure(0, weight=0)
+        root.rowconfigure(1, weight=0)
+        root.rowconfigure(2, weight=1)
+
+        def set_title(t):
+            label_header.config(text=t)
+
+        app = frontend.App(root, show_header=False, title_callback=set_title)
+        app.grid(row=2, column=0, columnspan=2, sticky='nsew')
+        app.configure(bg=PRIMARY)
+
+    root.after(1200, start_app)
     root.mainloop()
     
 if __name__ == '__main__':

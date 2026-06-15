@@ -197,6 +197,8 @@ class ScrollableGridTable(tk.Frame):
                 if self.edit_callback and not has_children:
                     btn_edit = tk.Button(cell_frame, text='Edit', fg='#0563c1', bg=bg_color, activebackground=bg_color, activeforeground='#044280', cursor='hand2', bd=0, command=lambda i=iid: self.edit_callback(i))
                     if self.delete_callback:
+                        separator = tk.Frame(cell_frame, width=1, bg="#cccccc", height=22)
+                        separator.pack(side='right', padx=(0, 10), pady=6, fill='y')
                         btn_edit.pack(side='right', padx=(10, 15)) # Extra space between Edit and Delete
                     else:
                         btn_edit.pack(expand=True) # Center if only edit button is present
@@ -1226,7 +1228,7 @@ class ViewOrderPage(tk.Frame):
         self.action_overlays = {}
 
         # Main border frame
-        main_frame = tk.Frame(self, bd=1, relief="solid", bg=PRIMARY)
+        main_frame = tk.Frame(self, bd=0, relief="solid", bg=PRIMARY)
         main_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         # reserve notebook row for content
         main_frame.rowconfigure(3, weight=1)
@@ -2094,7 +2096,7 @@ class CustomersPage(tk.Frame):
         self.controller = controller
         self.action_overlays = {}
 
-        main_frame = tk.Frame(self, bd=1, relief="solid", bg=PRIMARY)
+        main_frame = tk.Frame(self, bd=0, relief="solid", bg=PRIMARY)
         main_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(3, weight=1)
