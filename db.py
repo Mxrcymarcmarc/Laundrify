@@ -17,6 +17,7 @@ def init_db():
             ServiceID INTEGER PRIMARY KEY AUTOINCREMENT,
             Service_Type TEXT NOT NULL,
             Service_Unit_Price INTEGER NOT NULL,
+            Large_Unit_Price INTEGER DEFAULT NULL,
             Service_Unit TEXT NOT NULL DEFAULT 'pcs'
         )
         """,
@@ -88,6 +89,11 @@ def init_db():
         # Ensure ORDER_DETAILS has Additional_Notes column (migrated from ORDERS.Order_Notes)
         try:
             cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Additional_Notes TEXT NULL")
+        except Exception:
+            pass
+        # Ensure SERVICES has Large_Unit_Price column for pcs services
+        try:
+            cursor.execute("ALTER TABLE SERVICES ADD COLUMN Large_Unit_Price INTEGER DEFAULT NULL")
         except Exception:
             pass
         # Ensure SERVICES has Service_Unit column (kg or pcs)
@@ -462,7 +468,10 @@ def get_services():
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, IFNULL(Large_Unit_Price, Service_Unit_Price) as Large_Unit_Price, IFNULL(Service_Unit,'pcs') as Service_Unit FROM SERVICES ORDER BY Service_Type")
+        try:
+            cursor.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, IFNULL(Large_Unit_Price, Service_Unit_Price) as Large_Unit_Price, IFNULL(Service_Unit,'pcs') as Service_Unit FROM SERVICES ORDER BY Service_Type")
+        except Exception:
+            cursor.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, Service_Unit_Price as Large_Unit_Price, IFNULL(Service_Unit,'pcs') as Service_Unit FROM SERVICES ORDER BY Service_Type")
         return cursor.fetchall()
 
 def add_service(service_type, unit_price, unit='pcs', large_price=None):
@@ -507,9 +516,9 @@ def restore_default_services():
             cursor.execute("SELECT ServiceID FROM SERVICES WHERE Service_Type = ?", (name,))
             row = cursor.fetchone()
             if row and row[0]:
-                cursor.execute("UPDATE SERVICES SET Service_Unit_Price = ?, Service_Unit = ? WHERE ServiceID = ?", (int(price), unit, row[0]))
+                cursor.execute("UPDATE SERVICES SET Service_Unit_Price = ?, Service_Unit = ?, Large_Unit_Price = ? WHERE ServiceID = ?", (int(price), unit, int(price), row[0]))
             else:
-                cursor.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit) VALUES (?, ?, ?)", (name, int(price), unit))
+                cursor.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Large_Unit_Price, Service_Unit) VALUES (?, ?, ?, ?)", (name, int(price), int(price), unit))
         conn.commit()
     return True
 
