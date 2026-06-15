@@ -32,6 +32,11 @@ def reload_services_for_page(page):
             name = s['Service_Type']
             price = s['Service_Unit_Price'] or 0
             try:
+                l_price = s['Large_Unit_Price']
+                if l_price is None: l_price = price
+            except Exception:
+                l_price = price
+            try:
                 unit = (s['Service_Unit'] or 'pcs').lower()
             except Exception:
                 unit = 'pcs'
@@ -39,7 +44,7 @@ def reload_services_for_page(page):
                 page.service_map[name] = ('weight', price)
             else:
                 # for pcs show size radios by default (small/large)
-                page.service_map[name] = ('size', {'small': price, 'large': price})
+                page.service_map[name] = ('size', {'small': price, 'large': l_price})
     except Exception:
         pass
     # update combobox values if combobox exists
@@ -54,6 +59,22 @@ class App(tk.Frame):
         self.backend = backend
         self.title_callback = title_callback or (lambda t: None)
         self.configure(bg=PRIMARY)
+
+        # Global Treeview Style
+        style = ttk.Style()
+        style.configure("Fun.Treeview", 
+                        background="#ffffff",
+                        foreground="#2c3e50",
+                        rowheight=35,
+                        fieldbackground="#ffffff",
+                        font=("Arial", 11),
+                        borderwidth=0)
+        style.configure("Fun.Treeview.Heading", 
+                        font=("Arial", 11, "bold"), 
+                        foreground="#4A6FA5",
+                        borderwidth=1,
+                        relief="flat")
+        style.map("Fun.Treeview", background=[('selected', ACCENT)], foreground=[('selected', 'black')])
 
         # decide where to place content rows depending on header
         content_row = 2 if show_header else 0
@@ -73,8 +94,8 @@ class App(tk.Frame):
 
         # container for pages
         container = tk.Frame(self)
-        container.grid(row=content_row, column=0, sticky="ew", padx=8, pady=(8, 0))
-        container.rowconfigure(0, weight=0)
+        container.grid(row=content_row, column=0, sticky="nsew", padx=8, pady=(8, 0))
+        container.rowconfigure(0, weight=1)
         container.columnconfigure(0, weight=1)
 
         # create pages
@@ -161,7 +182,7 @@ class NewOrderPage(tk.Frame):
         right.rowconfigure(2, weight=1)
 
         # left form using grid only
-        left.columnconfigure(0, minsize=80)
+        left.columnconfigure(0, minsize=130)
         left.columnconfigure(1, weight=1)
         for i in range(2):
             left.rowconfigure(i, pad=5)
@@ -213,7 +234,7 @@ class NewOrderPage(tk.Frame):
         # Dynamic field frame (weight or size selection)
         self.dynamic_frame = tk.Frame(left, bg=PRIMARY)
         self.dynamic_frame.grid(row=7, column=0, columnspan=2, sticky="ew", pady=6)
-        self.dynamic_frame.columnconfigure(0, minsize=80)
+        self.dynamic_frame.columnconfigure(0, minsize=130)
         self.dynamic_frame.columnconfigure(1, weight=1)
         # unit price display (updated on service selection)
         self.unit_price_var = tk.StringVar()
@@ -255,7 +276,9 @@ class NewOrderPage(tk.Frame):
         # order items table
         right.rowconfigure(2, weight=1)
         columns = ("service", "quantity", "price", "notes")
-        self.order_tree = ttk.Treeview(right, columns=columns, show="headings")
+        self.order_tree = ttk.Treeview(right, columns=columns, show="headings", style="Fun.Treeview")
+        self.order_tree.tag_configure("evenrow", background="#f8f9fa")
+        self.order_tree.tag_configure("oddrow", background="#ffffff")
         for col in columns:
             self.order_tree.heading(col, text=col.capitalize())
             # keep the notes column hidden from view
@@ -336,7 +359,9 @@ class NewOrderPage(tk.Frame):
         container.rowconfigure(0, weight=1); container.columnconfigure(0, weight=1)
 
         cols = ('ID','First Name','Last Name','Phone','Email','Address')
-        tree = ttk.Treeview(container, columns=cols, show='headings')
+        tree = ttk.Treeview(container, columns=cols, show='headings', style="Fun.Treeview")
+        tree.tag_configure("evenrow", background="#f8f9fa")
+        tree.tag_configure("oddrow", background="#ffffff")
         for c in cols:
             tree.heading(c, text=c)
             tree.column(c, width=110 if c!='Address' else 220, anchor='w')
@@ -355,7 +380,8 @@ class NewOrderPage(tk.Frame):
                 rows = []
             for r in rows:
                 rr = dict(r)
-                tree.insert('', 'end', iid=str(rr.get('CustomerID')), values=(rr.get('CustomerID'), rr.get('First_Name',''), rr.get('Last_Name',''), rr.get('Phone_Number',''), rr.get('Email',''), rr.get('Address','')))
+                tag = "evenrow" if len(tree.get_children()) % 2 == 0 else "oddrow"
+                tree.insert('', 'end', iid=str(rr.get('CustomerID')), values=(rr.get('CustomerID'), rr.get('First_Name',''), rr.get('Last_Name',''), rr.get('Phone_Number',''), rr.get('Email',''), rr.get('Address','')), tags=(tag,))
 
         def populate_filtered():
             f = entry_first.get().strip().lower()
@@ -431,11 +457,11 @@ class NewOrderPage(tk.Frame):
 
         if service_type == "weight":
             # Show weight entry field
-            tk.Label(self.dynamic_frame, text="Weight (kg):", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w")
+            tk.Label(self.dynamic_frame, text="Weight (kg):", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w", pady=(8,0))
             self.weight_var = tk.Entry(self.dynamic_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
             vcmd_weight = self.dynamic_frame.register(self.validate_weight)
             self.weight_var.config(validate='key', validatecommand=(vcmd_weight, '%P'))
-            self.weight_var.grid(row=0, column=1, sticky="ew", ipady=3)
+            self.weight_var.grid(row=0, column=1, sticky="ew", ipady=3, pady=(8,0))
             self.size_var = None
             self.qty_var = None
             # show unit price for weight service
@@ -448,20 +474,20 @@ class NewOrderPage(tk.Frame):
             # size-based or per-item
             if service_type == 'size':
                 # Show radio buttons for small/large
-                tk.Label(self.dynamic_frame, text="Size:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w")
+                tk.Label(self.dynamic_frame, text="Size:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w", pady=(8,0))
                 self.size_var = tk.StringVar(value="small")
                 rb_frame = tk.Frame(self.dynamic_frame, bg=PRIMARY)
-                rb_frame.grid(row=0, column=1, sticky="ew")
-                tk.Radiobutton(rb_frame, text="Small", font=REG_TEXT, bg=PRIMARY, variable=self.size_var, value="small").pack(side="left", padx=5)
-                tk.Radiobutton(rb_frame, text="Large", font=REG_TEXT, bg=PRIMARY, variable=self.size_var, value="large").pack(side="left", padx=5)
+                rb_frame.grid(row=0, column=1, sticky="ew", pady=(8,0))
+                tk.Radiobutton(rb_frame, text="Small", font=REG_TEXT, bg=PRIMARY, activebackground=PRIMARY, selectcolor="white", cursor="hand2", variable=self.size_var, value="small").pack(side="left", padx=(0, 15))
+                tk.Radiobutton(rb_frame, text="Large", font=REG_TEXT, bg=PRIMARY, activebackground=PRIMARY, selectcolor="white", cursor="hand2", variable=self.size_var, value="large").pack(side="left", padx=15)
                 
                 # Show quantity entry field
-                tk.Label(self.dynamic_frame, text="Quantity:", font=TTL_TEXT, bg=PRIMARY).grid(row=1, column=0, sticky="w")
+                tk.Label(self.dynamic_frame, text="Quantity:", font=TTL_TEXT, bg=PRIMARY).grid(row=1, column=0, sticky="w", pady=(8,0))
                 self.qty_var = tk.Entry(self.dynamic_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
                 # Register quantity validation - only numbers
                 vcmd_qty = self.dynamic_frame.register(self.validate_quantity)
                 self.qty_var.config(validate='key', validatecommand=(vcmd_qty, '%P'))
-                self.qty_var.grid(row=1, column=1, sticky="ew", ipady=3)
+                self.qty_var.grid(row=1, column=1, sticky="ew", ipady=3, pady=(8,0))
                 self.weight_var = None
                 # show price breakdown for sizes
                 try:
@@ -472,11 +498,11 @@ class NewOrderPage(tk.Frame):
                     self.unit_price_var.set("")
             else:
                 # per-item service: single quantity entry
-                tk.Label(self.dynamic_frame, text="Quantity:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w")
+                tk.Label(self.dynamic_frame, text="Quantity:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky="w", pady=(8,0))
                 self.qty_var = tk.Entry(self.dynamic_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
                 vcmd_qty = self.dynamic_frame.register(self.validate_quantity)
                 self.qty_var.config(validate='key', validatecommand=(vcmd_qty, '%P'))
-                self.qty_var.grid(row=0, column=1, sticky="ew", ipady=3)
+                self.qty_var.grid(row=0, column=1, sticky="ew", ipady=3, pady=(8,0))
                 self.weight_var = None
                 self.size_var = None
                 # show unit price
@@ -543,44 +569,86 @@ class NewOrderPage(tk.Frame):
         from tkinter import messagebox
         svc_win = tk.Toplevel(self)
         svc_win.title('Manage Services')
-        svc_win.geometry('480x400')
+        svc_win.geometry('520x520')
         svc_win.resizable(False, False)
+        svc_win.configure(bg=PRIMARY)
         svc_win.grab_set()
 
-        container = tk.Frame(svc_win, padx=12, pady=12)
+        container = tk.Frame(svc_win, padx=16, pady=16, bg=PRIMARY)
         container.pack(fill='both', expand=True)
         container.columnconfigure(0, weight=1)
 
-        cols = ('Service', 'Price', 'Unit')
-        tree = ttk.Treeview(container, columns=cols, show='headings')
-        for c in cols:
+        # Title
+        tk.Label(container, text="Configure Services", font=HDR2_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+
+        # Treeview inside a bordered frame
+        tree_border = tk.Frame(container, bg="white", bd=1, relief="solid", highlightbackground=SECONDARY, highlightthickness=1)
+        tree_border.grid(row=1, column=0, columnspan=2, sticky='nsew')
+        tree_border.columnconfigure(0, weight=1)
+        tree_border.rowconfigure(0, weight=1)
+
+        cols = ('Service', 'Price', 'Unit', 'LargePrice')
+        tree = ttk.Treeview(tree_border, columns=cols, displaycolumns=('Service', 'Price', 'Unit'), show='headings', style="Fun.Treeview", height=5)
+        tree.tag_configure("evenrow", background="#f8f9fa")
+        tree.tag_configure("oddrow", background="#ffffff")
+        for c in ('Service', 'Price', 'Unit'):
             tree.heading(c, text=c)
-            tree.column(c, anchor='w', width=160 if c=='Service' else 80)
+            tree.column(c, anchor='w', width=200 if c == 'Service' else 90)
         tree.grid(row=0, column=0, sticky='nsew')
 
-        scrollbar = ttk.Scrollbar(container, command=tree.yview)
+        scrollbar = ttk.Scrollbar(tree_border, command=tree.yview)
         tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.grid(row=0, column=1, sticky='ns')
 
-        # form for add/edit
-        form = tk.Frame(container)
-        form.grid(row=1, column=0, columnspan=2, sticky='ew', pady=8)
+        # Separator
+        ttk.Separator(container, orient='horizontal').grid(row=2, column=0, columnspan=2, sticky='ew', pady=10)
+
+        # Form for add/edit
+        form = tk.Frame(container, bg=PRIMARY)
+        form.grid(row=3, column=0, columnspan=2, sticky='ew')
         form.columnconfigure(1, weight=1)
-        tk.Label(form, text='Service Type:').grid(row=0, column=0, sticky='w')
-        svc_entry = tk.Entry(form)
-        svc_entry.grid(row=0, column=1, sticky='ew')
-        tk.Label(form, text='Unit Price (₱):').grid(row=1, column=0, sticky='w')
-        price_entry = tk.Entry(form)
-        price_entry.grid(row=1, column=1, sticky='ew')
-        tk.Label(form, text='Unit:').grid(row=2, column=0, sticky='w')
-        unit_combo = ttk.Combobox(form, values=['pcs','kg'], state='readonly', width=6)
-        unit_combo.grid(row=2, column=1, sticky='w')
+
+        tk.Label(form, text='Service Type:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w', pady=3)
+        svc_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        svc_entry.grid(row=0, column=1, sticky='ew', pady=3, ipady=2)
+
+        tk.Label(form, text='Unit:', font=TTL_TEXT, bg=PRIMARY).grid(row=1, column=0, sticky='w', pady=3)
+        unit_combo = ttk.Combobox(form, values=['pcs', 'kg'], state='readonly', width=8, font=REG_TEXT)
+        unit_combo.grid(row=1, column=1, sticky='w', pady=3)
+
+        price_lbl = tk.Label(form, text='Small Price (₱):', font=TTL_TEXT, bg=PRIMARY)
+        price_lbl.grid(row=2, column=0, sticky='w', pady=3)
+        price_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        price_entry.grid(row=2, column=1, sticky='ew', pady=3, ipady=2)
+
+        large_lbl = tk.Label(form, text='Large Price (₱):', font=TTL_TEXT, bg=PRIMARY)
+        large_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+
+        # Track the selected service name for the delete button label
+        delete_btn_text = tk.StringVar(value='Delete')
+
+        def on_unit_change(event=None):
+            if unit_combo.get() == 'pcs':
+                price_lbl.config(text='Small Price (₱):')
+                large_lbl.grid(row=3, column=0, sticky='w', pady=3)
+                large_entry.grid(row=3, column=1, sticky='ew', pady=3, ipady=2)
+            else:
+                price_lbl.config(text='Unit Price (₱):')
+                large_lbl.grid_forget()
+                large_entry.grid_forget()
+
+        unit_combo.bind('<<ComboboxSelected>>', on_unit_change)
 
         def load_services():
             for i in tree.get_children():
                 tree.delete(i)
             for s in db.get_services():
-                tree.insert('', 'end', iid=s['ServiceID'], values=(s['Service_Type'], f"{s['Service_Unit_Price']}", s['Service_Unit']))
+                tag = "evenrow" if len(tree.get_children()) % 2 == 0 else "oddrow"
+                lp = s['Large_Unit_Price']
+                p = s['Service_Unit_Price']
+                if lp is None:
+                    lp = p
+                tree.insert('', 'end', iid=s['ServiceID'], values=(s['Service_Type'], f"{p}", s['Service_Unit'], f"{lp}"), tags=(tag,))
         load_services()
 
         def on_select(evt):
@@ -591,52 +659,97 @@ class NewOrderPage(tk.Frame):
             vals = tree.item(sid, 'values')
             svc_entry.delete(0, tk.END); svc_entry.insert(0, vals[0])
             price_entry.delete(0, tk.END); price_entry.insert(0, vals[1])
+            large_entry.delete(0, tk.END); large_entry.insert(0, vals[3])
             try:
                 unit_combo.set(vals[2])
             except Exception:
                 unit_combo.set('pcs')
+            on_unit_change()
+            # Update delete button label
+            delete_btn_text.set(f'Delete "{vals[0]}"')
         tree.bind('<<TreeviewSelect>>', on_select)
+
+        def clear_form():
+            """Clear form fields and deselect treeview."""
+            svc_entry.delete(0, tk.END)
+            price_entry.delete(0, tk.END)
+            large_entry.delete(0, tk.END)
+            unit_combo.set('')
+            large_lbl.grid_forget()
+            large_entry.grid_forget()
+            price_lbl.config(text='Small Price (₱):')
+            for sel in tree.selection():
+                tree.selection_remove(sel)
+            delete_btn_text.set('Delete')
 
         def save():
             name = svc_entry.get().strip()
             price = price_entry.get().strip()
             unit = unit_combo.get() or 'pcs'
+            large_price = large_entry.get().strip() if unit == 'pcs' else price
             if not name or not price:
                 messagebox.showwarning('Missing', 'Please enter service name and price', parent=svc_win)
                 return
             try:
                 price_val = int(float(price))
+                l_price_val = int(float(large_price)) if large_price else price_val
             except Exception:
                 messagebox.showerror('Invalid', 'Price must be a number', parent=svc_win)
                 return
             sel = tree.selection()
             if sel:
-                db.update_service(int(sel[0]), name, price_val, unit)
+                db.update_service(int(sel[0]), name, price_val, unit, l_price_val)
             else:
-                db.add_service(name, price_val, unit)
+                db.add_service(name, price_val, unit, l_price_val)
             load_services()
+            clear_form()
             try:
-                # refresh New Order service combobox
                 reload_services_for_page(self)
             except Exception:
                 pass
             messagebox.showinfo('Saved', 'Service saved', parent=svc_win)
 
+        def delete_selected():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showwarning('No Selection', 'Please select a service to delete.', parent=svc_win)
+                return
+            sid = sel[0]
+            svc_name = tree.item(sid, 'values')[0]
+            if not messagebox.askyesno('Delete Service', f'Are you sure you want to delete "{svc_name}"?', parent=svc_win):
+                return
+            db.delete_service(int(sid))
+            load_services()
+            clear_form()
+            try:
+                reload_services_for_page(self)
+            except Exception:
+                pass
+
         def restore_defaults():
             if messagebox.askyesno('Restore', 'Restore default services and prices?', parent=svc_win):
                 db.restore_default_services()
                 load_services()
+                clear_form()
                 try:
                     reload_services_for_page(self)
                 except Exception:
                     pass
 
-        btn_frame = tk.Frame(container)
-        btn_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=10)
-        btn_frame.columnconfigure((0,1,2), weight=1)
-        tk.Button(btn_frame, text='Close', command=svc_win.destroy).grid(row=0, column=0, sticky='ew', padx=6)
-        tk.Button(btn_frame, text='Save', command=save, bg='#3498db', fg='white').grid(row=0, column=1, sticky='ew', padx=6)
-        tk.Button(btn_frame, text='Restore Defaults', command=restore_defaults, bg='#95a5a6', fg='white').grid(row=0, column=2, sticky='ew', padx=6)
+        # Buttons
+        btn_frame = tk.Frame(container, bg=PRIMARY)
+        btn_frame.grid(row=4, column=0, columnspan=2, sticky='ew', pady=(12, 0))
+        btn_frame.columnconfigure((0, 1, 2, 3), weight=1)
+
+        tk.Button(btn_frame, text='Cancel', font=TTL_TEXT, bg=ACCENT, fg='#333333', relief='flat', cursor='hand2',
+                  command=svc_win.destroy).grid(row=0, column=0, sticky='ew', padx=4, ipady=4)
+        tk.Button(btn_frame, text='Confirm', font=TTL_TEXT, bg=SECONDARY, fg='white', relief='flat', cursor='hand2',
+                  command=save).grid(row=0, column=1, sticky='ew', padx=4, ipady=4)
+        delete_btn = tk.Button(btn_frame, textvariable=delete_btn_text, font=TTL_TEXT, bg='#e74c3c', fg='white', relief='flat', cursor='hand2',
+                               command=delete_selected)
+        delete_btn.grid(row=0, column=2, sticky='ew', padx=4, ipady=4)
+        tk.Button(btn_frame, text='Restore Defaults', font=TTL_TEXT, bg='#95a5a6', fg='white', relief='flat', cursor='hand2',
+                  command=restore_defaults).grid(row=0, column=3, sticky='ew', padx=4, ipady=4)
         
     def add_item(self):
         from tkinter import messagebox
@@ -726,7 +839,8 @@ class NewOrderPage(tk.Frame):
 
         # capture current additional notes for this item and store it in hidden column
         item_notes = self.notes_text.get("1.0", "end-1c").strip()
-        self.order_tree.insert("", "end", values=(service, quantity, f"₱ {price:.2f}", item_notes))
+        tag = "evenrow" if len(self.order_tree.get_children()) % 2 == 0 else "oddrow"
+        self.order_tree.insert("", "end", values=(service, quantity, f"₱ {price:.2f}", item_notes), tags=(tag,))
         # clear notes box after adding the item so next item can have its own notes
         try:
             self.notes_text.delete('1.0', tk.END)
@@ -872,11 +986,11 @@ class ViewOrderPage(tk.Frame):
         main_frame.columnconfigure(0, weight=1)
 
         # Top section with title and buttons
-        top_frame = tk.Frame(main_frame)
+        top_frame = tk.Frame(main_frame, bg=PRIMARY)
         top_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=10)
         top_frame.columnconfigure(0, weight=1)
 
-        self.subheading_label = tk.Label(top_frame, text="View Orders", font=("Arial", 12, "bold"))
+        self.subheading_label = tk.Label(top_frame, text="View Orders", font=("Arial", 12, "bold"), bg=PRIMARY)
         self.subheading_label.grid(row=0, column=0, sticky="w")
 
         # Action buttons on right
@@ -983,7 +1097,9 @@ class ViewOrderPage(tk.Frame):
         # Notebook tabs for Unpaid / Paid / Archived
         style = ttk.Style()
         try:
-            style.configure('TNotebook.Tab', font=('Segoe UI', 11, 'bold'), padding=[12, 8])
+            style.configure('TNotebook', background="white", borderwidth=0)
+            style.configure('TNotebook.Tab', font=("Arial", 12, "bold"), padding=[20, 10], relief="flat", borderwidth=0, background="#f0f0f0", foreground="black")
+            style.map("TNotebook.Tab", background=[("selected", "white")], foreground=[("selected", SECONDARY)])
         except Exception:
             pass
 
@@ -1019,7 +1135,9 @@ class ViewOrderPage(tk.Frame):
             frame.pack(fill='both', expand=True)
             scrollbar = ttk.Scrollbar(frame)
             scrollbar.pack(side='right', fill='y')
-            tree = ttk.Treeview(frame, columns=cols, show="tree headings", yscrollcommand=scrollbar.set)
+            tree = ttk.Treeview(frame, columns=cols, show="tree headings", yscrollcommand=scrollbar.set, style="Fun.Treeview")
+            tree.tag_configure("evenrow", background="#f8f9fa")
+            tree.tag_configure("oddrow", background="#ffffff")
             # keep a reference to scrollbar so we can bind its events later
             tree._scrollbar = scrollbar
             scrollbar.config(command=tree.yview)
@@ -1274,7 +1392,8 @@ class ViewOrderPage(tk.Frame):
             vals = [date_str, customer, "—", "—", status, f"₱{total}", paid]
             if include_action:
                 vals.append('')
-            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(vals))
+            tag = "evenrow" if len(tree.get_children()) % 2 == 0 else "oddrow"
+            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(vals), tags=(tag,))
             return
 
         is_mixed = len(svc_rows) > 1
@@ -1293,7 +1412,8 @@ class ViewOrderPage(tk.Frame):
             ]
             if include_action:
                 vals.append('')
-            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(vals))
+            tag = "evenrow" if len(tree.get_children()) % 2 == 0 else "oddrow"
+            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(vals), tags=(tag,))
         else:
             # Mixed-service order: parent row collapsed by default
             try:
@@ -1311,7 +1431,8 @@ class ViewOrderPage(tk.Frame):
             ]
             if include_action:
                 parent_vals.append('')
-            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(parent_vals), open=False, tags=('parent_mixed',))
+            tag = "evenrow" if len(tree.get_children()) % 2 == 0 else "oddrow"
+            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(parent_vals), open=False, tags=('parent_mixed', tag))
 
             for idx, srow in enumerate(svc_rows):
                 svc_iid = f"{oid}-{srow['service_id']}-{idx}"
@@ -1912,7 +2033,7 @@ class CustomersPage(tk.Frame):
         super().__init__(parent)
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.configure(bg=PRIMARY)
+        self.configure(bg=SECONDARY)
         self.controller = controller
         self.action_overlays = {}
 
@@ -1933,17 +2054,17 @@ class CustomersPage(tk.Frame):
         search_frame.grid(row=1, column=0, sticky='ew', padx=12, pady=6)
         # left: ID search
         tk.Label(search_frame, text='Search ID:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w')
-        self.search_id_entry = tk.Entry(search_frame, width=12, font=REG_TEXT)
-        self.search_id_entry.grid(row=0, column=1, padx=6)
+        self.search_id_entry = tk.Entry(search_frame, width=12, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.search_id_entry.grid(row=0, column=1, padx=6, ipady=3)
         tk.Button(search_frame, text='Search by ID', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.search_by_id).grid(row=0, column=2, padx=6)
 
         # right: name search
         tk.Label(search_frame, text='First Name:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=3, padx=(30,6))
-        self.search_first = tk.Entry(search_frame, width=15, font=REG_TEXT)
-        self.search_first.grid(row=0, column=4)
+        self.search_first = tk.Entry(search_frame, width=15, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.search_first.grid(row=0, column=4, ipady=3)
         tk.Label(search_frame, text='Last Name:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=5, padx=(12,6))
-        self.search_last = tk.Entry(search_frame, width=15, font=REG_TEXT)
-        self.search_last.grid(row=0, column=6)
+        self.search_last = tk.Entry(search_frame, width=15, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+        self.search_last.grid(row=0, column=6, ipady=3)
         tk.Button(search_frame, text='Search by Name', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.search_by_name).grid(row=0, column=7, padx=8)
 
         def check_id_empty(event):
@@ -1962,7 +2083,7 @@ class CustomersPage(tk.Frame):
         sep.grid(row=2, column=0, sticky='ew', padx=8, pady=(4,8))
 
         # Table area
-        table_frame = tk.Frame(main_frame)
+        table_frame = tk.Frame(main_frame, bg=PRIMARY)
         table_frame.grid(row=3, column=0, sticky="nsew", padx=12, pady=6)
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
@@ -1971,7 +2092,9 @@ class CustomersPage(tk.Frame):
         scrollbar.grid(row=0, column=1, sticky='ns')
 
         cols = ("First Name", "Last Name", "Phone", "Email", "Address", "Action")
-        self.customer_tree = ttk.Treeview(table_frame, columns=cols, show="tree headings", yscrollcommand=scrollbar.set)
+        self.customer_tree = ttk.Treeview(table_frame, columns=cols, show="tree headings", yscrollcommand=scrollbar.set, style="Fun.Treeview")
+        self.customer_tree.tag_configure("evenrow", background="#f8f9fa")
+        self.customer_tree.tag_configure("oddrow", background="#ffffff")
         self.customer_tree._scrollbar = scrollbar
         scrollbar.config(command=self.customer_tree.yview)
 
@@ -2015,7 +2138,8 @@ class CustomersPage(tk.Frame):
         for c in customers:
             cid = c['CustomerID']
             vals = (c['First_Name'], c['Last_Name'], c['Phone_Number'], c['Email'] or '', c['Address'] or '', '')
-            self.customer_tree.insert('', 'end', iid=str(cid), text=str(cid), values=vals)
+            tag = "evenrow" if len(self.customer_tree.get_children()) % 2 == 0 else "oddrow"
+            self.customer_tree.insert('', 'end', iid=str(cid), text=str(cid), values=vals, tags=(tag,))
         # update count label
         try:
             cnt = len(customers)
@@ -2217,9 +2341,10 @@ class ReportsPage(tk.Frame):
         super().__init__(parent)
         self.rowconfigure(1, weight=1)
         self.columnconfigure(0, weight=1)
+        self.configure(bg=PRIMARY)
         
         # Tab buttons
-        tab_frame = tk.Frame(self, bd=1, relief="solid")
+        tab_frame = tk.Frame(self, relief="solid", bg=PRIMARY)
         tab_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
         tab_frame.columnconfigure((0,1,2,3,4,5), weight=1)
         
@@ -2234,7 +2359,7 @@ class ReportsPage(tk.Frame):
         }
         self.tab_buttons = {}
         for key, label in tabs.items():
-            btn = tk.Button(tab_frame, text=label, command=lambda k=key: self.show_report(k))
+            btn = tk.Button(tab_frame, text=label, command=lambda k=key: self.show_report(k), font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY)
             btn.grid(row=0, column=list(tabs.keys()).index(key), sticky="ew", padx=4, pady=4)
             self.tab_buttons[key] = btn
         
@@ -2281,21 +2406,7 @@ class ReportsPage(tk.Frame):
             tree_container.columnconfigure(0, weight=1)
             tree_container.rowconfigure(0, weight=1)
             
-            # Style setup
-            style = ttk.Style()
-            style.configure("Fun.Treeview", 
-                            background="#ffffff",
-                            foreground="#2c3e50",
-                            rowheight=35,
-                            fieldbackground="#ffffff",
-                            font=("Arial", 11),
-                            borderwidth=0)
-            style.configure("Fun.Treeview.Heading", 
-                            font=("Arial", 11, "bold"), 
-                            foreground="#4A6FA5",
-                            borderwidth=1,
-                            relief="flat")
-            style.map("Fun.Treeview", background=[('selected', ACCENT)], foreground=[('selected', 'black')])
+            # Styles have been moved to App.__init__ globally
             
             def build_tree(parent, data):
                 columns = ("rank", "name", "orders", "revenue")

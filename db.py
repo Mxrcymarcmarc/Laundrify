@@ -462,22 +462,32 @@ def get_services():
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, IFNULL(Service_Unit,'pcs') as Service_Unit FROM SERVICES ORDER BY Service_Type")
+        cursor.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, IFNULL(Large_Unit_Price, Service_Unit_Price) as Large_Unit_Price, IFNULL(Service_Unit,'pcs') as Service_Unit FROM SERVICES ORDER BY Service_Type")
         return cursor.fetchall()
 
-def add_service(service_type, unit_price, unit='pcs'):
+def add_service(service_type, unit_price, unit='pcs', large_price=None):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit) VALUES (?, ?, ?)", (service_type, int(unit_price), unit))
+        l_price = int(large_price) if large_price is not None else int(unit_price)
+        cursor.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit, Large_Unit_Price) VALUES (?, ?, ?, ?)", (service_type, int(unit_price), unit, l_price))
         conn.commit()
         return cursor.lastrowid
 
-def update_service(service_id, service_type, unit_price, unit='pcs'):
+def update_service(service_id, service_type, unit_price, unit='pcs', large_price=None):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("UPDATE SERVICES SET Service_Type = ?, Service_Unit_Price = ?, Service_Unit = ? WHERE ServiceID = ?", (service_type, int(unit_price), unit, service_id))
+        l_price = int(large_price) if large_price is not None else int(unit_price)
+        cursor.execute("UPDATE SERVICES SET Service_Type = ?, Service_Unit_Price = ?, Service_Unit = ?, Large_Unit_Price = ? WHERE ServiceID = ?", (service_type, int(unit_price), unit, l_price, service_id))
         conn.commit()
         return True
+
+def delete_service(service_id):
+    """Delete a service by its ID. Returns True on success."""
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM SERVICES WHERE ServiceID = ?", (service_id,))
+        conn.commit()
+        return cursor.rowcount > 0
 
 def restore_default_services():
     """Restore a curated default set of services and prices.
@@ -1342,6 +1352,12 @@ def delete_service_row(order_id, service_id):
             
         cursor.execute("UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?", (agg_status, order_id))
         
+        from datetime import datetime
+        if agg_status == 'Ready':
+            cursor.execute("UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ? AND Order_Ready_At IS NULL", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
+        elif agg_status == 'Released':
+            cursor.execute("UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ? AND Order_Released_At IS NULL", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
+        
         # Recalculate payment status
         cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
         unpaid_count = cursor.fetchone()[0]
@@ -1429,6 +1445,11 @@ def update_service_details(order_id, service_id, weight, subtotal, status, paid_
             agg_status = 'Received'
             
         cursor.execute("UPDATE ORDERS SET Order_Status = ? WHERE OrderID = ?", (agg_status, order_id))
+        
+        if agg_status == 'Ready':
+            cursor.execute("UPDATE ORDERS SET Order_Ready_At = ? WHERE OrderID = ? AND Order_Ready_At IS NULL", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
+        elif agg_status == 'Released':
+            cursor.execute("UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ? AND Order_Released_At IS NULL", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
         
         # Recalculate parent order payment status
         cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
