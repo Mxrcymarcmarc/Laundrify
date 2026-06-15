@@ -30,7 +30,7 @@ def init_db():
             Order_Received_At TEXT NOT NULL,
             Order_Ready_At TEXT NULL,
             Order_Released_At TEXT NULL,
-            Order_Payed_At TEXT NULL,
+            Order_Paid_At TEXT NULL,
             -- Order notes are now stored per-service in ORDER_DETAILS.Additional_Notes
             FOREIGN KEY (CustomerID) REFERENCES CUSTOMERS(CustomerID)
         )
@@ -45,7 +45,8 @@ def init_db():
             Item_Unit TEXT NOT NULL DEFAULT 'pcs',
             Service_Name TEXT DEFAULT '',
             Service_Status TEXT DEFAULT 'Received',
-            Service_Payed_At TEXT DEFAULT NULL,
+            Service_Paid_At TEXT DEFAULT NULL,
+            Additional_Notes,
             FOREIGN KEY (OrderID) REFERENCES ORDERS(OrderID),
             FOREIGN KEY (ServiceID) REFERENCES SERVICES(ServiceID)
         )
@@ -81,9 +82,9 @@ def init_db():
             cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Service_Status TEXT DEFAULT 'Received'")
         except Exception:
             pass
-        # Ensure ORDER_DETAILS has Service_Payed_At column
+        # Ensure ORDER_DETAILS has Service_Paid_At column
         try:
-            cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Service_Payed_At TEXT DEFAULT NULL")
+            cursor.execute("ALTER TABLE ORDER_DETAILS ADD COLUMN Service_Paid_At TEXT DEFAULT NULL")
         except Exception:
             pass
         # Ensure ORDER_DETAILS has Additional_Notes column (migrated from ORDERS.Order_Notes)
@@ -113,7 +114,7 @@ def init_db():
             pass
         conn.commit()
 
-    # Backfill Service_Status and Service_Payed_At for existing order details from ORDERS table
+    # Backfill Service_Status and Service_Paid_At for existing order details from ORDERS table
     try:
         with sqlite3.connect("Laundrify.db") as cconn:
             cc = cconn.cursor()
@@ -123,11 +124,11 @@ def init_db():
                 SET Service_Status = (SELECT Order_Status FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID)
                 WHERE Service_Status = 'Received' AND EXISTS (SELECT 1 FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID)
             """)
-            # If Service_Payed_At is NULL, backfill with parent order's payment timestamp
+            # If Service_Paid_At is NULL, backfill with parent order's payment timestamp
             cc.execute("""
                 UPDATE ORDER_DETAILS
-                SET Service_Payed_At = (SELECT Order_Payed_At FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID)
-                WHERE Service_Payed_At IS NULL AND EXISTS (SELECT 1 FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID AND ORDERS.Order_Payed_At IS NOT NULL)
+                SET Service_Paid_At = (SELECT Order_Paid_At FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID)
+                WHERE Service_Paid_At IS NULL AND EXISTS (SELECT 1 FROM ORDERS WHERE ORDERS.OrderID = ORDER_DETAILS.OrderID AND ORDERS.Order_Paid_At IS NOT NULL)
             """)
             cconn.commit()
             # If ORDERS still had Order_Notes, migrate them into ORDER_DETAILS.Additional_Notes
@@ -272,7 +273,7 @@ def get_orders():
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
                    c.First_Name, c.Last_Name
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
@@ -287,11 +288,11 @@ def get_unpaid_orders():
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
                    c.First_Name, c.Last_Name
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
-            WHERE o.Order_Payed_At IS NULL
+            WHERE o.Order_Paid_At IS NULL
             ORDER BY o.Order_Received_At DESC
         """)
         return cursor.fetchall()
@@ -313,7 +314,7 @@ def is_order_paid(order_id):
     """Check if an order has been paid"""
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT Order_Payed_At FROM ORDERS WHERE OrderID = ?", (order_id,))
+        cursor.execute("SELECT Order_Paid_At FROM ORDERS WHERE OrderID = ?", (order_id,))
         result = cursor.fetchone()
         return result and result[0] is not None
 
@@ -573,7 +574,7 @@ def process_payment(order_id, amount_paid):
             }
 
         cursor.execute(
-            "SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL",
+            "SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Paid_At IS NULL",
             (order_id,)
         )
         due_row = cursor.fetchone()
@@ -602,14 +603,14 @@ def process_payment(order_id, amount_paid):
         )
 
         cursor.execute(
-            "UPDATE ORDER_DETAILS SET Service_Payed_At = ? WHERE OrderID = ? AND Service_Payed_At IS NULL",
+            "UPDATE ORDER_DETAILS SET Service_Paid_At = ? WHERE OrderID = ? AND Service_Paid_At IS NULL",
             (timestamp, order_id)
         )
 
-        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
+        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Paid_At IS NULL", (order_id,))
         unpaid_count = cursor.fetchone()[0]
         if unpaid_count == 0:
-            cursor.execute("UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?", (timestamp, order_id))
+            cursor.execute("UPDATE ORDERS SET Order_Paid_At = ? WHERE OrderID = ?", (timestamp, order_id))
 
         conn.commit()
 
@@ -628,7 +629,7 @@ def get_order_amount_due(order_id):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL",
+            "SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Paid_At IS NULL",
             (order_id,)
         )
         row = cursor.fetchone()
@@ -794,11 +795,11 @@ def get_paid_orders():
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
                    c.First_Name, c.Last_Name
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
-            WHERE o.Order_Payed_At IS NOT NULL AND o.Order_Released_At IS NULL
+            WHERE o.Order_Paid_At IS NOT NULL AND o.Order_Released_At IS NULL
             ORDER BY o.Order_Received_At DESC
         """)
         return cursor.fetchall()
@@ -810,11 +811,11 @@ def get_archived_orders():
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
                    c.First_Name, c.Last_Name
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
-            WHERE o.Order_Payed_At IS NOT NULL AND o.Order_Released_At IS NOT NULL
+            WHERE o.Order_Paid_At IS NOT NULL AND o.Order_Released_At IS NOT NULL
             ORDER BY o.Order_Received_At DESC
         """)
         return cursor.fetchall()
@@ -826,11 +827,11 @@ def get_unpaid_orders_by_date(start_date, end_date):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
                    c.First_Name, c.Last_Name, c.Email
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
-            WHERE o.Order_Payed_At IS NULL
+            WHERE o.Order_Paid_At IS NULL
             AND date(o.Order_Received_At) BETWEEN date(?) AND date(?)
             ORDER BY o.Order_Received_At DESC
         """, (start_date, end_date))
@@ -842,11 +843,11 @@ def get_paid_orders_by_date(start_date, end_date):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
                    c.First_Name, c.Last_Name, c.Email
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
-            WHERE o.Order_Payed_At IS NOT NULL AND o.Order_Released_At IS NULL
+            WHERE o.Order_Paid_At IS NOT NULL AND o.Order_Released_At IS NULL
             AND date(o.Order_Received_At) BETWEEN date(?) AND date(?)
             ORDER BY o.Order_Received_At DESC
         """, (start_date, end_date))
@@ -858,11 +859,11 @@ def get_archived_orders_by_date(start_date, end_date):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Payed_At,
+                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
                    c.First_Name, c.Last_Name, c.Email
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
-            WHERE o.Order_Payed_At IS NOT NULL AND o.Order_Released_At IS NOT NULL
+            WHERE o.Order_Paid_At IS NOT NULL AND o.Order_Released_At IS NOT NULL
             AND date(o.Order_Received_At) BETWEEN date(?) AND date(?)
             ORDER BY o.Order_Received_At DESC
         """, (start_date, end_date))
@@ -941,11 +942,11 @@ def get_revenue_report_data():
     
     query = """
         SELECT 
-            strftime('%w', o.Order_Payed_At) as day_num,
+            strftime('%w', o.Order_Paid_At) as day_num,
             SUM(o.Order_Total_Price) as total_revenue
         FROM ORDERS o
-        WHERE o.Order_Payed_At IS NOT NULL
-          AND date(o.Order_Payed_At) >= date('now', '-6 days')
+        WHERE o.Order_Paid_At IS NOT NULL
+          AND date(o.Order_Paid_At) >= date('now', '-6 days')
         GROUP BY day_num
     """
     
@@ -1096,7 +1097,7 @@ def get_top_customers_by_orders():
             SUM(O.Order_Total_Price) as total_spent
         FROM ORDERS O
         JOIN CUSTOMERS C ON O.CustomerID = C.CustomerID
-        WHERE O.Order_Payed_At IS NOT NULL
+        WHERE O.Order_Paid_At IS NOT NULL
         GROUP BY C.CustomerID
         ORDER BY total_orders DESC, total_spent DESC
         LIMIT 10
@@ -1115,7 +1116,7 @@ def get_top_customers_by_revenue():
             SUM(O.Order_Total_Price) as total_spent
         FROM ORDERS O
         JOIN CUSTOMERS C ON O.CustomerID = C.CustomerID
-        WHERE O.Order_Payed_At IS NOT NULL
+        WHERE O.Order_Paid_At IS NOT NULL
         GROUP BY C.CustomerID
         ORDER BY total_spent DESC, total_orders DESC
         LIMIT 10
@@ -1147,7 +1148,7 @@ def get_order_service_rows(order_id):
                       od.Item_Weight, IFNULL(od.Item_Unit, 'pcs') as Item_Unit,
                       IFNULL(od.Service_Name, '') as Service_Name,
                       IFNULL(od.Service_Status, 'Received') as Service_Status,
-                      od.Service_Payed_At,
+                      od.Service_Paid_At,
                       IFNULL(od.Additional_Notes, '') as Additional_Notes
                FROM ORDER_DETAILS od
                WHERE od.OrderID = ?
@@ -1205,7 +1206,7 @@ def get_order_service_rows(order_id):
             'qty_display': qty_display,
             'subtotal': float(subtotal),
             'status': row['Service_Status'] or 'Received',
-            'paid': 'Yes' if row['Service_Payed_At'] else 'No',
+            'paid': 'Yes' if row['Service_Paid_At'] else 'No',
             'notes': row['Additional_Notes'] if 'Additional_Notes' in row.keys() else ''
         })
     return result
@@ -1214,7 +1215,7 @@ def get_order_service_rows(order_id):
 def is_service_paid(order_id, service_id):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT Service_Payed_At FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+        cursor.execute("SELECT Service_Paid_At FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
         res = cursor.fetchone()
         return res and res[0] is not None
 
@@ -1226,7 +1227,7 @@ def process_service_payment(order_id, service_id, amount_paid):
     
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT OrderDetailID, Order_Subtotal, IFNULL(Service_Payed_At, '') FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+        cursor.execute("SELECT OrderDetailID, Order_Subtotal, IFNULL(Service_Paid_At, '') FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
         row = cursor.fetchone()
         if not row:
             return {
@@ -1256,7 +1257,7 @@ def process_service_payment(order_id, service_id, amount_paid):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # Update service payment status
-        cursor.execute("UPDATE ORDER_DETAILS SET Service_Payed_At = ? WHERE OrderDetailID = ?", (timestamp, odid))
+        cursor.execute("UPDATE ORDER_DETAILS SET Service_Paid_At = ? WHERE OrderDetailID = ?", (timestamp, odid))
         
         # Record payment in PAYMENTS table
         cursor.execute(
@@ -1265,12 +1266,12 @@ def process_service_payment(order_id, service_id, amount_paid):
         )
         
         # Check if all services for this order are paid now:
-        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
+        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Paid_At IS NULL", (order_id,))
         unpaid_count = cursor.fetchone()[0]
         
         if unpaid_count == 0:
             # Mark parent order as paid
-            cursor.execute("UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?", (timestamp, order_id))
+            cursor.execute("UPDATE ORDERS SET Order_Paid_At = ? WHERE OrderID = ?", (timestamp, order_id))
             
         conn.commit()
         
@@ -1370,16 +1371,16 @@ def delete_service_row(order_id, service_id):
             cursor.execute("UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ? AND Order_Released_At IS NULL", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
         
         # Recalculate payment status
-        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
+        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Paid_At IS NULL", (order_id,))
         unpaid_count = cursor.fetchone()[0]
         if unpaid_count == 0:
-            cursor.execute("SELECT Order_Payed_At FROM ORDERS WHERE OrderID = ?", (order_id,))
+            cursor.execute("SELECT Order_Paid_At FROM ORDERS WHERE OrderID = ?", (order_id,))
             p_at = cursor.fetchone()
             if not p_at or not p_at[0]:
                 from datetime import datetime
-                cursor.execute("UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_id))
+                cursor.execute("UPDATE ORDERS SET Order_Paid_At = ? WHERE OrderID = ?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_id))
         else:
-            cursor.execute("UPDATE ORDERS SET Order_Payed_At = NULL WHERE OrderID = ?", (order_id,))
+            cursor.execute("UPDATE ORDERS SET Order_Paid_At = NULL WHERE OrderID = ?", (order_id,))
             
         conn.commit()
         return True, False  # success, parent order NOT deleted
@@ -1422,7 +1423,7 @@ def update_service_details(order_id, service_id, weight, subtotal, status, paid_
         
         # Determine paid timestamp
         if paid_val:
-            cursor.execute("SELECT Service_Payed_At FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+            cursor.execute("SELECT Service_Paid_At FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
             curr_paid = cursor.fetchone()
             if curr_paid and curr_paid[0]:
                 paid_at = curr_paid[0]
@@ -1433,7 +1434,7 @@ def update_service_details(order_id, service_id, weight, subtotal, status, paid_
             
         cursor.execute("""
             UPDATE ORDER_DETAILS
-            SET Item_Weight = ?, Item_Unit = ?, Order_Subtotal = ?, Service_Status = ?, Service_Payed_At = ?, Additional_Notes = ?
+            SET Item_Weight = ?, Item_Unit = ?, Order_Subtotal = ?, Service_Status = ?, Service_Paid_At = ?, Additional_Notes = ?
             WHERE OrderID = ? AND ServiceID = ?
         """, (qty_value, unit, subtotal, status, paid_at, notes, order_id, service_id))
         
@@ -1463,15 +1464,15 @@ def update_service_details(order_id, service_id, weight, subtotal, status, paid_
             cursor.execute("UPDATE ORDERS SET Order_Released_At = ? WHERE OrderID = ? AND Order_Released_At IS NULL", (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), order_id))
         
         # Recalculate parent order payment status
-        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Payed_At IS NULL", (order_id,))
+        cursor.execute("SELECT COUNT(*) FROM ORDER_DETAILS WHERE OrderID = ? AND Service_Paid_At IS NULL", (order_id,))
         unpaid_count = cursor.fetchone()[0]
         if unpaid_count == 0:
-            cursor.execute("SELECT Order_Payed_At FROM ORDERS WHERE OrderID = ?", (order_id,))
+            cursor.execute("SELECT Order_Paid_At FROM ORDERS WHERE OrderID = ?", (order_id,))
             p_at = cursor.fetchone()
             if not p_at or not p_at[0]:
-                cursor.execute("UPDATE ORDERS SET Order_Payed_At = ? WHERE OrderID = ?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_id))
+                cursor.execute("UPDATE ORDERS SET Order_Paid_At = ? WHERE OrderID = ?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_id))
         else:
-            cursor.execute("UPDATE ORDERS SET Order_Payed_At = NULL WHERE OrderID = ?", (order_id,))
+            cursor.execute("UPDATE ORDERS SET Order_Paid_At = NULL WHERE OrderID = ?", (order_id,))
             
         conn.commit()
         return True

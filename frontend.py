@@ -1488,7 +1488,7 @@ class ViewOrderPage(tk.Frame):
         date_str = order['Order_Received_At']
         customer = f"{order['First_Name']} {order['Last_Name']}"
         status = order['Order_Status']
-        paid = "Yes" if order['Order_Payed_At'] else "No"
+        paid = "Yes" if order['Order_Paid_At'] else "No"
         total = order['Order_Total_Price']
 
         try:
