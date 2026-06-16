@@ -564,7 +564,8 @@ class NewOrderPage(tk.Frame):
         from tkinter import messagebox
         # If phone entry has value, try to find directly
         phone = self.phone_entry.get().strip()
-        if phone:
+        # Only perform an automatic direct lookup by phone when other fields are empty
+        if phone and not (self.first_name_entry.get().strip() or self.last_name_entry.get().strip() or self.address_entry.get().strip() or self.email_entry.get().strip()):
             try:
                 for c in db.get_customers():
                     if c['Phone_Number'] == phone:
@@ -629,6 +630,8 @@ class NewOrderPage(tk.Frame):
                 self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rd.get('Email','') or '')
                 self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rd.get('Phone_Number','') or '')
                 self.update_customer_number(rd.get('CustomerID'))
+                # Inform the user immediately when a customer is selected
+                messagebox.showinfo('Found', f"Loaded customer {rd.get('First_Name','')} {rd.get('Last_Name','')}")
             sel_win.destroy()
             
         tree = ScrollableGridTable(container, cols, include_action=False, double_click_callback=_on_double)
@@ -681,6 +684,8 @@ class NewOrderPage(tk.Frame):
                 self.email_entry.delete(0, tk.END); self.email_entry.insert(0, rd.get('Email','') or '')
                 self.phone_entry.delete(0, tk.END); self.phone_entry.insert(0, rd.get('Phone_Number','') or '')
                 self.update_customer_number(rd.get('CustomerID'))
+                # Inform the user immediately when a customer is selected
+                messagebox.showinfo('Found', f"Loaded customer {rd.get('First_Name','')} {rd.get('Last_Name','')}")
             sel_win.destroy()
 
         btnf = tk.Frame(sel_win, bg=PRIMARY)
@@ -2273,25 +2278,42 @@ class CustomersPage(tk.Frame):
         rec = dict(rec)
         edit_win = tk.Toplevel(self)
         edit_win.title(f"Edit Customer {cid}")
-        edit_win.geometry("420x360")
+        edit_win.geometry("460x420")
         edit_win.resizable(False, False)
         edit_win.grab_set()
+        edit_win.configure(bg=PRIMARY)
         edit_win.rowconfigure(0, weight=1); edit_win.columnconfigure(0, weight=1)
 
-        form = tk.Frame(edit_win, padx=12, pady=12)
+        form = tk.Frame(edit_win, padx=16, pady=12, bg=PRIMARY)
         form.grid(row=0, column=0, sticky='nsew')
         form.columnconfigure(1, weight=1)
 
-        tk.Label(form, text='First Name:').grid(row=0, column=0, sticky='w')
-        e_first = tk.Entry(form); e_first.grid(row=0, column=1, sticky='ew'); e_first.insert(0, rec['First_Name'])
-        tk.Label(form, text='Last Name:').grid(row=1, column=0, sticky='w')
-        e_last = tk.Entry(form); e_last.grid(row=1, column=1, sticky='ew'); e_last.insert(0, rec['Last_Name'])
-        tk.Label(form, text='Phone:').grid(row=2, column=0, sticky='w')
-        e_phone = tk.Entry(form); e_phone.grid(row=2, column=1, sticky='ew'); e_phone.insert(0, rec['Phone_Number'])
-        tk.Label(form, text='Email:').grid(row=3, column=0, sticky='w')
-        e_email = tk.Entry(form); e_email.grid(row=3, column=1, sticky='ew'); e_email.insert(0, rec.get('Email','') or '')
-        tk.Label(form, text='Address:').grid(row=4, column=0, sticky='nw')
-        e_addr = tk.Text(form, height=4); e_addr.grid(row=4, column=1, sticky='ew'); e_addr.insert('1.0', rec.get('Address','') or '')
+        # Title and subtitle
+        title_lbl = tk.Label(form, text='Edit Details', font=HDR2_TEXT, bg=PRIMARY, fg=SECONDARY, anchor='w')
+        title_lbl.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0,4))
+        subtitle = f"For Customer {rec.get('First_Name','')} {rec.get('Last_Name','')}"
+        sub_lbl = tk.Label(form, text=subtitle, font=(REG_TEXT,11,"bold"), bg=PRIMARY, fg="#555555", anchor='w')
+        sub_lbl.grid(row=1, column=0, columnspan=2, sticky='w', pady=(0,10))
+
+        tk.Label(form, text='First Name:', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=2, column=0, sticky='w', pady=(6,6))
+        e_first = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightbackground=ACCENT, highlightcolor=SECONDARY)
+        e_first.grid(row=2, column=1, sticky='ew', ipady=3, pady=(6,6)); e_first.insert(0, rec['First_Name'])
+
+        tk.Label(form, text='Last Name:', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=3, column=0, sticky='w', pady=(6,6))
+        e_last = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightbackground=ACCENT, highlightcolor=SECONDARY)
+        e_last.grid(row=3, column=1, sticky='ew', ipady=3, pady=(6,6)); e_last.insert(0, rec['Last_Name'])
+
+        tk.Label(form, text='Phone:', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=4, column=0, sticky='w', pady=(6,6))
+        e_phone = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightbackground=ACCENT, highlightcolor=SECONDARY)
+        e_phone.grid(row=4, column=1, sticky='ew', ipady=3, pady=(6,6)); e_phone.insert(0, rec['Phone_Number'])
+
+        tk.Label(form, text='Email:', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=5, column=0, sticky='w', pady=(6,6))
+        e_email = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightbackground=ACCENT, highlightcolor=SECONDARY)
+        e_email.grid(row=5, column=1, sticky='ew', ipady=3, pady=(6,6)); e_email.insert(0, rec.get('Email','') or '')
+
+        tk.Label(form, text='Address:', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=6, column=0, sticky='nw', pady=(6,6))
+        e_addr = tk.Text(form, height=4, font=REG_TEXT, highlightthickness=2, highlightbackground=ACCENT, highlightcolor=SECONDARY)
+        e_addr.grid(row=6, column=1, sticky='ew', pady=(6,6)); e_addr.insert('1.0', rec.get('Address','') or '')
 
         def save_changes():
             try:
@@ -2311,8 +2333,9 @@ class CustomersPage(tk.Frame):
             except Exception as e:
                 messagebox.showerror('Error', str(e))
 
-        btnf = tk.Frame(form); btnf.grid(row=5, column=0, columnspan=2, pady=12); btnf.columnconfigure(0, weight=1)
-        tk.Button(btnf, text='Save', command=save_changes, bg=SECONDARY, fg='white').grid(row=0, column=0, sticky='ew', padx=6)
+        btnf = tk.Frame(form, bg=PRIMARY); btnf.grid(row=7, column=0, columnspan=2, pady=(12,0), sticky='ew'); btnf.columnconfigure((0,1), weight=1)
+        tk.Button(btnf, text='Save', command=save_changes, font=TTL_TEXT, bg=SECONDARY, fg='white', cursor='hand2').grid(row=0, column=0, sticky='ew', padx=6)
+        tk.Button(btnf, text='Delete', command=do_delete, font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, cursor='hand2').grid(row=0, column=1, sticky='ew', padx=6)
 
 class ReportsPage(tk.Frame):
     def __init__(self, parent, controller):
