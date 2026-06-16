@@ -663,25 +663,31 @@ def get_next_order_id():
 def create_or_get_customer(first_name, last_name, phone_number, email="", address=""):
     """Create or find an existing customer.
 
-    Matching priority:
-    1. Phone number (if provided)
-    2. Exact match on first_name + last_name + address (trimmed)
-    3. Create new record
+    Matching logic:
+    1. If phone is provided, reuse an existing customer only when phone and identity match.
+    2. Otherwise try exact match on first_name + last_name + address (trimmed).
+    3. If no match is found, create a new customer record.
     """
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
 
         phone = (phone_number or "").strip()
-        if phone:
-            cursor.execute("SELECT CustomerID FROM CUSTOMERS WHERE Phone_Number = ?", (phone,))
-            result = cursor.fetchone()
-            if result:
-                return result[0]
-
-        # Try matching by exact name + address when phone not provided or not found
         fn = (first_name or "").strip()
         ln = (last_name or "").strip()
         addr = (address or "").strip()
+
+        if phone:
+            cursor.execute(
+                "SELECT CustomerID, First_Name, Last_Name, Address FROM CUSTOMERS WHERE Phone_Number = ?",
+                (phone,)
+            )
+            rows = cursor.fetchall()
+            for row in rows:
+                existing_id, existing_fn, existing_ln, existing_addr = row
+                if (existing_fn or "").strip() == fn and (existing_ln or "").strip() == ln and (existing_addr or "").strip() == addr:
+                    return existing_id
+
+        # Try matching by exact name + address when phone not provided or phone did not resolve to the same identity
         if fn or ln or addr:
             cursor.execute(
                 "SELECT CustomerID FROM CUSTOMERS WHERE TRIM(First_Name)=? AND TRIM(Last_Name)=? AND TRIM(Address)=?",
