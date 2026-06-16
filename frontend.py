@@ -1261,8 +1261,30 @@ class ViewOrderPage(tk.Frame):
         # Action buttons on right
         button_frame = tk.Frame(top_frame, bg=PRIMARY)
         button_frame.grid(row=0, column=1, sticky="e", padx=5, pady=5)
+        
+        # Gear Button to the left side
+        tk.Button(
+            button_frame, 
+            text="⚙", 
+            font=TTL_TEXT, 
+            bg=SECONDARY, 
+            fg=PRIMARY, 
+            command=self.open_overdue_config_window, 
+            width=3,  # Compact square width for the icon
+            height=1
+        ).pack(side="left", padx=5)
 
-        tk.Button(button_frame, text="Process Payment", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.open_payment_window, width=15, height=1).pack(side="left", padx=5)
+        #Process Payment button placed next to it
+        tk.Button(
+            button_frame, 
+            text="Process Payment", 
+            font=TTL_TEXT, 
+            bg=SECONDARY, 
+            fg=PRIMARY, 
+            command=self.open_payment_window, 
+            width=15, 
+            height=1
+        ).pack(side="left", padx=5)
 
         # thin separator under heading (inside top_frame so filter_frame stays at previous row)
         sep1 = ttk.Separator(top_frame, orient='horizontal')
@@ -1818,8 +1840,59 @@ class ViewOrderPage(tk.Frame):
                 self._insert_order_rows(tree, order, include_action=include_action)
         except Exception as e:
             print(f"Error sorting orders: {e}")
+            
+    def open_overdue_config_window(self):
+        """Opens a top-level modal window to change the active overdue threshold configuration."""
+        import db
+        
+        config_win = tk.Toplevel(self)
+        config_win.title("Overdue Rules Config")
+        config_win.geometry("340x180")
+        config_win.configure(bg=PRIMARY)
+        config_win.grab_set()  # Lock window focus
+        config_win.resizable(False, False)
+        
+        # Center modal window relative to display screen
+        config_win.update_idletasks()
+        w, h = config_win.winfo_width(), config_win.winfo_height()
+        x = (config_win.winfo_screenwidth() // 2) - (w // 2)
+        y = (config_win.winfo_screenheight() // 2) - (h // 2)
+        config_win.geometry(f'{w}x{h}+{x}+{y}')
+        
+        tk.Label(
+            config_win, 
+            text="Set Days Before 'Ready' Order is Overdue:", 
+            font=TTL_TEXT, 
+            bg=PRIMARY, 
+            fg=SECONDARY
+        ).pack(pady=(25, 10))
+        
+        # Form field capturing threshold integer entry bound to backend variable
+        days_var = tk.StringVar(value=str(db.OrderConfig.OVERDUE_DAYS))
+        days_entry = tk.Entry(config_win, textvariable=days_var, font=REG_TEXT, justify="center", width=12)
+        days_entry.pack(pady=5)
+        days_entry.focus()
+        
+        def save_config_action():
+            try:
+                val = int(days_var.get().strip())
+                if val < 0:
+                    raise ValueError
+                db.OrderConfig.OVERDUE_DAYS = val
+                config_win.destroy()
+                self.refresh_all()  # Instantly update current view table rows to show status changes
+            except ValueError:
+                from tkinter import messagebox
+                messagebox.showerror("Validation Error", "Please enter a valid positive integer number of days.")
 
-
+        tk.Button(
+            config_win, 
+            text="Save Settings", 
+            font=TTL_TEXT, 
+            bg=SECONDARY, 
+            fg=PRIMARY, 
+            command=save_config_action
+        ).pack(pady=15)
 
     def open_payment_window(self):
         

@@ -1,5 +1,10 @@
 import sqlite3
 
+class OrderConfig:
+    OVERDUE_DAYS = 7  # Simple backend variable configuration (default 7 days)
+
+from datetime import datetime
+
 def init_db():
     tables = [
         """
@@ -58,6 +63,12 @@ def init_db():
             Amount_Paid INTEGER NOT NULL,
             Payment_Date TEXT NOT NULL,
             FOREIGN KEY (OrderID) REFERENCES ORDERS(OrderID)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS SETTINGS (
+            SettingKey TEXT PRIMARY KEY,
+            SettingValue TEXT NULL
         )
         """,
     ]
@@ -266,20 +277,42 @@ def init_db():
     except Exception:
         pass
 
+def check_and_apply_overdue_logic(rows):
+    """
+    Takes database rows containing Order_Status and Order_Ready_At,
+    dynamically checks if a 'Ready' order has exceeded the configured threshold,
+    and updates its display status to 'Overdue' on the fly.
+    """
+    updated_rows = []
+    now = datetime.now()
+    
+    for row in rows:
+        # turn row into a mutable dictionary if row_factory is sqlite3.Row
+        r = dict(row)
+        if r.get('Order_Status') == 'Ready' and r.get('Order_Ready_At'):
+            try:
+                ready_date = datetime.strptime(r['Order_Ready_At'], '%Y-%m-%d %H:%M:%S')
+                days_elapsed = (now - ready_date).days
+                if days_elapsed >= OrderConfig.OVERDUE_DAYS:
+                    r['Order_Status'] = 'Overdue'
+            except Exception:
+                pass
+        updated_rows.append(r)
+    return updated_rows
+
 def get_orders():
     """Fetch all orders with their details"""
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
-                   c.First_Name, c.Last_Name
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At, c.First_Name, c.Last_Name
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
             ORDER BY o.Order_Received_At DESC
         """)
-        return cursor.fetchall()
+        # --- APPLY AUTOMATIC OVERDUE LOGIC HERE ---
+        return check_and_apply_overdue_logic(cursor.fetchall())
 
 def get_unpaid_orders():
     """Fetch orders that have not been paid yet"""
@@ -287,15 +320,14 @@ def get_unpaid_orders():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, 
-                   o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At,
-                   c.First_Name, c.Last_Name
+            SELECT o.OrderID, o.CustomerID, o.Order_Status, o.Order_Total_Price, o.Order_Received_At, o.Order_Ready_At, o.Order_Released_At, o.Order_Paid_At, c.First_Name, c.Last_Name
             FROM ORDERS o
             JOIN CUSTOMERS c ON o.CustomerID = c.CustomerID
             WHERE o.Order_Paid_At IS NULL
             ORDER BY o.Order_Received_At DESC
         """)
-        return cursor.fetchall()
+        # --- APPLY AUTOMATIC OVERDUE LOGIC HERE ---
+        return check_and_apply_overdue_logic(cursor.fetchall())
 
 def get_order_details(order_id):
     """Fetch detailed information about a specific order"""
