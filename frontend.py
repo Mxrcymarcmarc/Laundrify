@@ -169,7 +169,7 @@ class ScrollableGridTable(tk.Frame):
             bg_color = "#f8f9fa"
             
         if 'child_service' in tags:
-            bg_color = "#d2e3fc" # distinct light-blue background highlight across entire child row
+            bg_color = "#edf5fc" # distinct light-blue background highlight across entire child row
             
         if 'top1' in tags:
             bg_color = "#ffeaa7"
@@ -1359,8 +1359,8 @@ class ViewOrderPage(tk.Frame):
         # Notebook tabs for Unpaid / Paid / Archived
         style = ttk.Style()
         try:
-            style.configure('TNotebook', background="white", borderwidth=0)
-            style.configure('TNotebook.Tab', font=("Arial", 12, "bold"), padding=[20, 10], relief="flat", borderwidth=0, background="#f0f0f0", foreground="black")
+            style.configure('TNotebook', background=PRIMARY, borderwidth=0)
+            style.configure('TNotebook.Tab', font=("Arial", 12, "bold"), padding=[20, 10], relief="flat", borderwidth=2, background="#f0f0f0", foreground="black")
             style.map("TNotebook.Tab", background=[("selected", "white")], foreground=[("selected", SECONDARY)])
         except Exception:
             pass
@@ -1417,12 +1417,12 @@ class ViewOrderPage(tk.Frame):
 
         sort_frame = tk.Frame(legend_frame, bg=PRIMARY)
         sort_frame.grid(row=0, column=2, sticky='e')
-        self.order_sort_newest_btn = tk.Button(sort_frame, text='Newest first', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=lambda: self.set_order_sort(True), width=12)
-        self.order_sort_oldest_btn = tk.Button(sort_frame, text='Oldest first', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.set_order_sort(False), width=12)
-        self.order_sort_newest_btn.grid(row=0, column=0, padx=(0, 4))
-        self.order_sort_oldest_btn.grid(row=0, column=1, padx=(0, 12))
-        self.order_sort_label = tk.Label(sort_frame, text='Sorting by received date: newest first', font=REG_TEXT, bg=PRIMARY, fg=SECONDARY)
-        self.order_sort_label.grid(row=0, column=2, sticky='e')
+        self.order_sort_label = tk.Label(sort_frame, text='Sorting by received date: newest first', font=TTL_TEXT, bg=PRIMARY)
+        self.order_sort_label.grid(row=0, column=0, sticky='e', padx=13)
+        self.order_sort_newest_btn = tk.Button(sort_frame, text='Newest first', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1, command=lambda: self.set_order_sort(True), width=12)
+        self.order_sort_newest_btn.grid(row=0, column=1, padx=(0, 4))
+        self.order_sort_oldest_btn = tk.Button(sort_frame, text='Oldest first', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1, command=lambda: self.set_order_sort(False), width=12)
+        self.order_sort_oldest_btn.grid(row=0, column=2, padx=(0, 12))
 
         # Initialize visual sort state so the buttons reflect the current mode from startup
         self.set_order_sort(self.order_sort_desc, refresh=False)
@@ -1493,12 +1493,12 @@ class ViewOrderPage(tk.Frame):
         inactive_fg = SECONDARY
 
         if self.order_sort_desc:
-            self.order_sort_newest_btn.config(bg=active_bg, fg=active_fg)
-            self.order_sort_oldest_btn.config(bg=inactive_bg, fg=inactive_fg)
+            self.order_sort_newest_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
+            self.order_sort_oldest_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
             self.order_sort_label.config(text='Sorting by received date: newest first')
         else:
-            self.order_sort_newest_btn.config(bg=inactive_bg, fg=inactive_fg)
-            self.order_sort_oldest_btn.config(bg=active_bg, fg=active_fg)
+            self.order_sort_newest_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
+            self.order_sort_oldest_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
             self.order_sort_label.config(text='Sorting by received date: oldest first')
         if refresh:
             self.refresh_all()
@@ -2243,12 +2243,12 @@ class CustomersPage(tk.Frame):
 
         right_sort_frame = tk.Frame(sort_frame, bg=PRIMARY)
         right_sort_frame.grid(row=0, column=1, sticky='e')
-        self.customer_sort_asc_btn = tk.Button(right_sort_frame, width=12, text='Ascending', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, command=lambda: self.set_customer_sort(self.customer_sort_key, ascending=True))
-        self.customer_sort_desc_btn = tk.Button(right_sort_frame, width=12, text='Descending', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.set_customer_sort(self.customer_sort_key, ascending=False))
-        self.customer_sort_asc_btn.grid(row=0, column=0, padx=8)
-        self.customer_sort_desc_btn.grid(row=0, column=1, padx=8)
-        self.customer_sort_label = tk.Label(right_sort_frame, text='Current: ID ascending', font=REG_TEXT, bg=PRIMARY, fg=SECONDARY)
-        self.customer_sort_label.grid(row=0, column=2, padx=(12,0), sticky='e')
+        self.customer_sort_label = tk.Label(right_sort_frame, text='Current: ID ascending', font=TTL_TEXT, bg=PRIMARY)
+        self.customer_sort_label.grid(row=0, column=0, padx=(12,13), sticky='e')
+        self.customer_sort_asc_btn = tk.Button(right_sort_frame, width=12, text='Ascending', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1, command=lambda: self.set_customer_sort(self.customer_sort_key, ascending=True))
+        self.customer_sort_asc_btn.grid(row=0, column=1, padx=(0, 4))
+        self.customer_sort_desc_btn = tk.Button(right_sort_frame, width=12, text='Descending', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1, command=lambda: self.set_customer_sort(self.customer_sort_key, ascending=False))
+        self.customer_sort_desc_btn.grid(row=0, column=2, padx=(0, 12))
 
         self.refresh_customers()
 
@@ -2337,12 +2337,12 @@ class CustomersPage(tk.Frame):
 
     def update_customer_sort_buttons(self):
         if self.customer_sort_desc:
-            self.customer_sort_asc_btn.config(bg=PRIMARY, fg=SECONDARY)
-            self.customer_sort_desc_btn.config(bg=ACCENT, fg=PRIMARY)
+            self.customer_sort_asc_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
+            self.customer_sort_desc_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
             direction = 'descending'
         else:
-            self.customer_sort_asc_btn.config(bg=ACCENT, fg=PRIMARY)
-            self.customer_sort_desc_btn.config(bg=PRIMARY, fg=SECONDARY)
+            self.customer_sort_asc_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
+            self.customer_sort_desc_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
             direction = 'ascending'
         field_name = {'id': 'ID', 'first': 'First Name', 'last': 'Last Name'}.get(self.customer_sort_key, self.customer_sort_key)
         self.customer_sort_label.config(text=f'Current: {field_name} {direction}')
@@ -2464,7 +2464,18 @@ class ReportsPage(tk.Frame):
         }
         self.tab_buttons = {}
         for key, label in tabs.items():
-            btn = tk.Button(tab_frame, text=label, command=lambda k=key: self.show_report(k), font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY)
+            btn = tk.Button(
+                tab_frame,
+                text=label,
+                command=lambda k=key: self.show_report(k),
+                font=TTL_TEXT,
+                bg=ACCENT,
+                fg=SECONDARY,
+                activebackground=ACCENT,
+                activeforeground=SECONDARY,
+                relief='raised',
+                bd=1
+            )
             btn.grid(row=0, column=list(tabs.keys()).index(key), sticky="ew", padx=4, pady=4)
             self.tab_buttons[key] = btn
         
@@ -2479,6 +2490,13 @@ class ReportsPage(tk.Frame):
         
     def refresh(self):
         self.show_report(self.current_tab)
+
+    def update_report_tab_buttons(self):
+        for key, btn in self.tab_buttons.items():
+            if key == self.current_tab:
+                btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
+            else:
+                btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
     
     def show_report(self, report_type):
         # Clear previous chart
@@ -2491,6 +2509,9 @@ class ReportsPage(tk.Frame):
         self.chart_frame.rowconfigure(1, weight=1)
         
         self.current_tab = report_type
+        self.update_report_tab_buttons()
+
+        kpi_frame = tk.Frame(self.chart_frame, bg="white")
         
         if report_type == "customers":
             self.chart_frame.rowconfigure(0, weight=1)
@@ -2574,8 +2595,8 @@ class ReportsPage(tk.Frame):
             
             return
         
-        # Setup Top KPI Frame
-        kpi_frame = tk.Frame(self.chart_frame, bg="white")
+        self.update_report_tab_buttons()
+
         
         if report_type == "services":
             from db import get_top_services_report_data
