@@ -146,6 +146,13 @@ class ScrollableGridTable(tk.Frame):
     def clear_all(self):
         for iid in list(self.rows.keys()):
             self.delete(iid)
+        self.current_row_idx = 1
+        self.selected_iids = []
+        self.row_order = []
+        try:
+            self.canvas.yview_moveto(0)
+        except Exception:
+            pass
 
     def insert(self, parent, index, iid=None, text='', values=(), tags=(), open=False):
         if iid is None:
