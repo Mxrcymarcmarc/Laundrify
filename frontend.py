@@ -55,7 +55,7 @@ def reload_services_for_page(page):
 
 class ScrollableGridTable(tk.Frame):
     def __init__(self, parent, columns, include_action=True, edit_callback=None, delete_callback=None, double_click_callback=None):
-        super().__init__(parent, bg=PRIMARY)
+        super().__init__(parent, bg="white")
         self.columns = columns
         self.include_action = include_action
         self.edit_callback = edit_callback
@@ -65,7 +65,7 @@ class ScrollableGridTable(tk.Frame):
         self.alignments = {}
         self.widths = {}
         for c in columns:
-            if c in ("Qty/Wt", "Total", "OrderID", "ID", "Total Revenue"):
+            if c in ("Qty/Wt", "Total", "OrderID", "ID", "Total Revenue", "Quantity", "Price"):
                 self.alignments[c] = "e"
                 self.widths[c] = 12
             elif c in ("Action", "Rank", "Total Orders"):
@@ -81,7 +81,7 @@ class ScrollableGridTable(tk.Frame):
                 self.alignments[c] = "w"
                 self.widths[c] = 20
 
-        self.canvas = tk.Canvas(self, bg=PRIMARY, highlightthickness=0)
+        self.canvas = tk.Canvas(self, bg="white", highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         
         # Grid frame container with dark background for 1px gridlines
@@ -147,7 +147,10 @@ class ScrollableGridTable(tk.Frame):
         for iid in list(self.rows.keys()):
             self.delete(iid)
 
-    def insert(self, parent, index, iid, text='', values=(), tags=(), open=False):
+    def insert(self, parent, index, iid=None, text='', values=(), tags=(), open=False):
+        if iid is None:
+            import uuid
+            iid = str(uuid.uuid4())
         row_idx = self.current_row_idx
         self.current_row_idx += 1
         
@@ -177,7 +180,9 @@ class ScrollableGridTable(tk.Frame):
             'widgets': [],
             'open': open,
             'bg_color': bg_color,
-            'tags': tags
+            'tags': tags,
+            'text': text,
+            'values': values
         }
         
         for col_idx, col_name in enumerate(self.columns):
@@ -245,6 +250,7 @@ class ScrollableGridTable(tk.Frame):
             if parent_data and not parent_data['open']:
                 for w in row_data['widgets']:
                     w.grid_remove()
+        return iid
 
     def toggle_expand(self, iid):
         row_data = self.rows.get(iid)
@@ -264,12 +270,18 @@ class ScrollableGridTable(tk.Frame):
                 for w in child_data['widgets']:
                     w.grid_remove()
 
-    def item(self, iid, open=None):
+    def item(self, iid, option=None, **kwargs):
         row_data = self.rows.get(iid)
         if not row_data: return {}
-        if open is not None and row_data['open'] != open:
+        
+        if option == 'values':
+            return (row_data.get('text', ''),) + tuple(row_data.get('values', ()))
+            
+        open_val = kwargs.get('open', option if isinstance(option, bool) else None)
+        if open_val is not None and row_data['open'] != open_val:
             self.toggle_expand(iid)
-        return {'open': row_data['open']}
+            
+        return {'open': row_data['open'], 'values': (row_data.get('text', ''),) + tuple(row_data.get('values', ()))}
 
     def _on_row_click(self, iid):
         self.selection_set([iid])
@@ -531,18 +543,8 @@ class NewOrderPage(tk.Frame):
 
         # order items table
         right.rowconfigure(2, weight=1)
-        columns = ("service", "quantity", "price", "notes")
-        self.order_tree = ttk.Treeview(right, columns=columns, show="headings", style="Fun.Treeview")
-        self.order_tree.tag_configure("evenrow", background="#f8f9fa")
-        self.order_tree.tag_configure("oddrow", background="#ffffff")
-        for col in columns:
-            self.order_tree.heading(col, text=col.capitalize())
-            # keep the notes column hidden from view
-            if col == 'notes':
-                self.order_tree.column(col, anchor="w", width=0, stretch=False)
-                self.order_tree.heading(col, text='')
-            else:
-                self.order_tree.column(col, anchor="w")
+        columns = ("Service", "Quantity", "Price")
+        self.order_tree = ScrollableGridTable(right, columns=columns, include_action=False)
         self.order_tree.grid(row=2, column=0, sticky="nsew", pady=6)
 
         # buttons under the table
@@ -1094,7 +1096,7 @@ class NewOrderPage(tk.Frame):
         # capture current additional notes for this item and store it in hidden column
         item_notes = self.notes_text.get("1.0", "end-1c").strip()
         tag = "evenrow" if len(self.order_tree.get_children()) % 2 == 0 else "oddrow"
-        self.order_tree.insert("", "end", values=(service, quantity, f"₱ {price:.2f}", item_notes), tags=(tag,))
+        self.order_tree.insert("", "end", text=service, values=(quantity, f"₱ {price:.2f}", item_notes), tags=(tag,))
         # clear notes box after adding the item so next item can have its own notes
         try:
             self.notes_text.delete('1.0', tk.END)
