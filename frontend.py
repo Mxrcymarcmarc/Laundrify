@@ -1255,6 +1255,8 @@ class ViewOrderPage(tk.Frame):
 
         self.subheading_label = tk.Label(top_frame, text="View Orders", font=("Arial", 12, "bold"), bg=PRIMARY)
         self.subheading_label.grid(row=0, column=0, sticky="w")
+        self.order_sort_desc = True
+        self.order_sort_field = 'Order_Received_At'
 
         # Action buttons on right
         button_frame = tk.Frame(top_frame, bg=PRIMARY)
@@ -1273,55 +1275,42 @@ class ViewOrderPage(tk.Frame):
         filter_frame.columnconfigure(3, weight=0)
         filter_frame.columnconfigure(5, weight=0)
         filter_frame.columnconfigure(7, weight=0)
+        filter_frame.columnconfigure(8, weight=0)
+        filter_frame.columnconfigure(9, weight=1)
 
-        tk.Label(filter_frame, text="Search ID:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, padx=5)
+        tk.Label(filter_frame, text="Search ID:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, padx=5, sticky='w')
         self.search_entry = tk.Entry(filter_frame, width=15, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
-        self.search_entry.grid(row=0, column=1, padx=5, ipady=2)
+        self.search_entry.grid(row=0, column=1, padx=5, ipady=2, sticky='w')
 
         search_btn = tk.Button(filter_frame, text="Search", font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=self.search_orders, width=8)
-        search_btn.grid(row=0, column=2, padx=(5,15))
+        search_btn.grid(row=0, column=2, padx=(5,15), sticky='w')
 
-        def check_orders_search_empty(event):
-            if not self.search_entry.get().strip():
-                self.refresh_all()
-        self.search_entry.bind('<KeyRelease>', check_orders_search_empty)
-
-        tk.Label(filter_frame, text="Date From:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=3, padx=(8,5))
+        tk.Label(filter_frame, text="Date From:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=3, padx=(0,5), sticky='w')
         self.date_from = tk.Entry(filter_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY, width=12)
         self.date_from.insert(0, "mm/dd/yyyy")
-        self.date_from.grid(row=0, column=4, padx=(5,10), ipady=2)
+        self.date_from.grid(row=0, column=4, padx=(5,10), ipady=2, sticky='w')
 
-        tk.Label(filter_frame, text="To:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=5, padx=5)
+        tk.Label(filter_frame, text="To:", font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=5, padx=5, sticky='w')
         self.date_to = tk.Entry(filter_frame, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY, width=12)
         self.date_to.insert(0, "mm/dd/yyyy")
-        self.date_to.grid(row=0, column=6, padx=(5,12), ipady=2)
+        self.date_to.grid(row=0, column=6, padx=(5,12), ipady=2, sticky='w')
 
-        # improve date entry UX: clear placeholder on focus, restore if empty
-        def _clear_placeholder(event):
-            w = event.widget
-            if w.get() in ("mm/dd/yyyy", ""):
-                w.delete(0, tk.END)
-        def _restore_placeholder(event):
-            w = event.widget
-            if not w.get():
-                w.insert(0, "mm/dd/yyyy")
-        self.date_from.bind('<FocusIn>', _clear_placeholder)
-        self.date_from.bind('<FocusOut>', _restore_placeholder)
-        self.date_to.bind('<FocusIn>', _clear_placeholder)
-        self.date_to.bind('<FocusOut>', _restore_placeholder)
 
-        # Quick-fill functions
+        # Quick-fill helper functions
         def _fill_today():
             from datetime import date
             s = date.today().strftime('%m/%d/%Y')
-            self.date_from.delete(0, tk.END); self.date_to.delete(0, tk.END)
-            self.date_from.insert(0, s); self.date_to.insert(0, s)
+            self.date_from.delete(0, tk.END)
+            self.date_to.delete(0, tk.END)
+            self.date_from.insert(0, s)
+            self.date_to.insert(0, s)
         def _fill_week():
             from datetime import date, timedelta
             today = date.today()
             start = today - timedelta(days=today.weekday())
             end = start + timedelta(days=6)
-            self.date_from.delete(0, tk.END); self.date_to.delete(0, tk.END)
+            self.date_from.delete(0, tk.END)
+            self.date_to.delete(0, tk.END)
             self.date_from.insert(0, start.strftime('%m/%d/%Y'))
             self.date_to.insert(0, end.strftime('%m/%d/%Y'))
         def _fill_month():
@@ -1331,16 +1320,19 @@ class ViewOrderPage(tk.Frame):
             start = today.replace(day=1)
             last_day = calendar.monthrange(today.year, today.month)[1]
             end = today.replace(day=last_day)
-            self.date_from.delete(0, tk.END); self.date_to.delete(0, tk.END)
+            self.date_from.delete(0, tk.END)
+            self.date_to.delete(0, tk.END)
             self.date_from.insert(0, start.strftime('%m/%d/%Y'))
             self.date_to.insert(0, end.strftime('%m/%d/%Y'))
         def _clear_dates():
-            self.date_from.delete(0, tk.END); self.date_to.delete(0, tk.END)
-            self.date_from.insert(0, 'mm/dd/yyyy'); self.date_to.insert(0, 'mm/dd/yyyy')
+            self.date_from.delete(0, tk.END)
+            self.date_to.delete(0, tk.END)
+            self.date_from.insert(0, 'mm/dd/yyyy')
+            self.date_to.insert(0, 'mm/dd/yyyy')
 
-        # Quick-fill buttons inline on same row (buttons assigned to variables for responsive behavior)
+        # Quick-fill buttons sit on the same row as the date search controls
         date_btn_frame = tk.Frame(filter_frame, bg=PRIMARY)
-        date_btn_frame.grid(row=0, column=7, padx=(2,0))
+        date_btn_frame.grid(row=0, column=7, padx=(10, 0), sticky='w')
         btn_today = tk.Button(date_btn_frame, text='Today', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, width=8, command=_fill_today)
         btn_today.pack(side='left', padx=2)
         btn_week = tk.Button(date_btn_frame, text='This Week', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, width=10, command=_fill_week)
@@ -1349,14 +1341,21 @@ class ViewOrderPage(tk.Frame):
         btn_month.pack(side='left', padx=2)
         btn_clear = tk.Button(date_btn_frame, text='Clear', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, width=6, command=_clear_dates)
         btn_clear.pack(side='left', padx=2)
-        search_btn_inline = tk.Button(date_btn_frame, text='Search by Date', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, width=12, command=self.search_by_date)
-        search_btn_inline.pack(side='left', padx=4)
-        # make space to right so layout doesn't look cramped — keep buttons near date fields
-        filter_frame.columnconfigure(7, weight=0)
-        filter_frame.columnconfigure(8, weight=1)
+
+        search_btn_inline = tk.Button(filter_frame, text='Search by Date', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, width=14, command=self.search_by_date)
+        search_btn_inline.grid(row=0, column=8, padx=6, sticky='w')
+        
+        # make space to the right so layout doesn't look cramped
+        filter_frame.columnconfigure(9, weight=1)
+
         # keep legacy variable name for compatibility
         search_date_btn = search_btn_inline
-        
+
+        def check_orders_search_empty(event):
+            if not self.search_entry.get().strip():
+                self.refresh_all()
+        self.search_entry.bind('<KeyRelease>', check_orders_search_empty)
+
         # Notebook tabs for Unpaid / Paid / Archived
         style = ttk.Style()
         try:
@@ -1404,12 +1403,29 @@ class ViewOrderPage(tk.Frame):
         # Legend/Filter at bottom (moved below the notebook)
         legend_frame = tk.Frame(main_frame, bg=PRIMARY)
         legend_frame.grid(row=4, column=0, sticky="ew", padx=15, pady=10)
+        legend_frame.columnconfigure(0, weight=0)
+        legend_frame.columnconfigure(1, weight=1)
+        legend_frame.columnconfigure(2, weight=0)
 
         legend_label = tk.Label(legend_frame, text="Filter By Status:", font=TTL_TEXT, bg=PRIMARY)
-        legend_label.pack(side="left", padx=5)
+        legend_label.grid(row=0, column=0, sticky='w', padx=5)
         
+        status_button_frame = tk.Frame(legend_frame, bg=PRIMARY)
+        status_button_frame.grid(row=0, column=1, sticky='w', padx=(10,0))
         for status in ["All", "Received", "In-Progress", "Ready", "Released"]:
-            tk.Button(legend_frame, text=status, font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, width=12, command=lambda s=status: self.sort_by_status(s)).pack(side="left", padx=3)
+            tk.Button(status_button_frame, text=status, font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, width=12, command=lambda s=status: self.sort_by_status(s)).pack(side="left", padx=3)
+
+        sort_frame = tk.Frame(legend_frame, bg=PRIMARY)
+        sort_frame.grid(row=0, column=2, sticky='e')
+        self.order_sort_newest_btn = tk.Button(sort_frame, text='Newest first', font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, command=lambda: self.set_order_sort(True), width=12)
+        self.order_sort_oldest_btn = tk.Button(sort_frame, text='Oldest first', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.set_order_sort(False), width=12)
+        self.order_sort_newest_btn.grid(row=0, column=0, padx=(0, 4))
+        self.order_sort_oldest_btn.grid(row=0, column=1, padx=(0, 12))
+        self.order_sort_label = tk.Label(sort_frame, text='Sorting by received date: newest first', font=REG_TEXT, bg=PRIMARY, fg=SECONDARY)
+        self.order_sort_label.grid(row=0, column=2, sticky='e')
+
+        # Initialize visual sort state so the buttons reflect the current mode from startup
+        self.set_order_sort(self.order_sort_desc, refresh=False)
 
         # Load initial data
         self.refresh_all()
@@ -1442,6 +1458,50 @@ class ViewOrderPage(tk.Frame):
             return self.paid_tree
         else:
             return self.archived_tree
+
+    def sort_orders(self, orders):
+        from datetime import datetime
+        def parse_date(value):
+            if not value:
+                return datetime.min
+            if isinstance(value, str):
+                for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%m/%d/%Y', '%m/%d/%Y %H:%M:%S'):
+                    try:
+                        return datetime.strptime(value, fmt)
+                    except Exception:
+                        continue
+            return datetime.min
+
+        def get_field_value(order, field):
+            if hasattr(order, 'get'):
+                return order.get(field)
+            try:
+                return order[field]
+            except Exception:
+                return None
+
+        try:
+            return sorted(orders, key=lambda o: parse_date(get_field_value(o, self.order_sort_field)), reverse=self.order_sort_desc)
+        except Exception:
+            return list(orders)
+
+    def set_order_sort(self, newest_first, refresh=True):
+        self.order_sort_desc = bool(newest_first)
+        active_bg = SECONDARY
+        inactive_bg = PRIMARY
+        active_fg = PRIMARY
+        inactive_fg = SECONDARY
+
+        if self.order_sort_desc:
+            self.order_sort_newest_btn.config(bg=active_bg, fg=active_fg)
+            self.order_sort_oldest_btn.config(bg=inactive_bg, fg=inactive_fg)
+            self.order_sort_label.config(text='Sorting by received date: newest first')
+        else:
+            self.order_sort_newest_btn.config(bg=inactive_bg, fg=inactive_fg)
+            self.order_sort_oldest_btn.config(bg=active_bg, fg=active_fg)
+            self.order_sort_label.config(text='Sorting by received date: oldest first')
+        if refresh:
+            self.refresh_all()
 
     # --- Action overlays (REMOVED: Now handled by CustomGridTable directly) ---
     def _clear_action_overlays(self, tree=None):
@@ -1579,7 +1639,7 @@ class ViewOrderPage(tk.Frame):
         tree = self.unpaid_tree
         tree.clear_all()
         try:
-            orders = db.get_unpaid_orders()
+            orders = self.sort_orders(db.get_unpaid_orders())
             for order in orders:
                 self._insert_order_rows(tree, order, include_action=True)
         except Exception as e:
@@ -1590,7 +1650,7 @@ class ViewOrderPage(tk.Frame):
         tree = self.paid_tree
         tree.clear_all()
         try:
-            orders = db.get_paid_orders()
+            orders = self.sort_orders(db.get_paid_orders())
             for order in orders:
                 self._insert_order_rows(tree, order, include_action=True)
         except Exception as e:
@@ -1601,7 +1661,7 @@ class ViewOrderPage(tk.Frame):
         tree = self.archived_tree
         tree.clear_all()
         try:
-            orders = db.get_archived_orders()
+            orders = self.sort_orders(db.get_archived_orders())
             for order in orders:
                 self._insert_order_rows(tree, order, include_action=False)
         except Exception as e:
@@ -1615,13 +1675,13 @@ class ViewOrderPage(tk.Frame):
         import db
         idx = self.notebook.index(self.notebook.select())
         if idx == 0:
-            orders = db.get_unpaid_orders()
+            orders = self.sort_orders(db.get_unpaid_orders())
             tree = self.unpaid_tree
         elif idx == 1:
-            orders = db.get_paid_orders()
+            orders = self.sort_orders(db.get_paid_orders())
             tree = self.paid_tree
         else:
-            orders = db.get_archived_orders()
+            orders = self.sort_orders(db.get_archived_orders())
             tree = self.archived_tree
 
         tree.clear_all()
@@ -1710,13 +1770,13 @@ class ViewOrderPage(tk.Frame):
         idx = self.notebook.index(self.notebook.select())
         try:
             if idx == 0:
-                orders = db.get_unpaid_orders_by_date(start_iso, end_iso)
+                orders = self.sort_orders(db.get_unpaid_orders_by_date(start_iso, end_iso))
                 tree = self.unpaid_tree
             elif idx == 1:
-                orders = db.get_paid_orders_by_date(start_iso, end_iso)
+                orders = self.sort_orders(db.get_paid_orders_by_date(start_iso, end_iso))
                 tree = self.paid_tree
             else:
-                orders = db.get_archived_orders_by_date(start_iso, end_iso)
+                orders = self.sort_orders(db.get_archived_orders_by_date(start_iso, end_iso))
                 tree = self.archived_tree
         except Exception as e:
             messagebox.showerror('Date Search', f'Database error: {e}')
@@ -1752,6 +1812,7 @@ class ViewOrderPage(tk.Frame):
 
         try:
             orders = [o for o in orders if o['Order_Status'] == status]
+            orders = self.sort_orders(orders)
             include_action = (idx in (0, 1))
             for order in orders:
                 self._insert_order_rows(tree, order, include_action=include_action)
@@ -2121,6 +2182,8 @@ class CustomersPage(tk.Frame):
         header_frame.columnconfigure(0, weight=1)
         tk.Label(header_frame, text='There are {0} Customer Records'.format('0'), font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w')
         self.count_label = header_frame.grid_slaves(row=0, column=0)[0]
+        self.customer_sort_key = 'id'
+        self.customer_sort_desc = False
 
         # Search area
         search_frame = tk.Frame(main_frame, bg=PRIMARY)
@@ -2168,10 +2231,24 @@ class CustomersPage(tk.Frame):
         # Sort buttons at bottom
         sort_frame = tk.Frame(main_frame, bg=PRIMARY)
         sort_frame.grid(row=4, column=0, sticky='ew', padx=12, pady=(8,6))
-        tk.Label(sort_frame, width=12, text='Sort Rows By:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w')
-        tk.Button(sort_frame, width=12, text='ID', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.sort_by('id')).grid(row=0, column=1, padx=8)
-        tk.Button(sort_frame, width=12, text='First Name', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.sort_by('first')).grid(row=0, column=2, padx=8)
-        tk.Button(sort_frame, width=12, text='Last Name', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.sort_by('last')).grid(row=0, column=3, padx=8)
+        sort_frame.columnconfigure(0, weight=1)
+        sort_frame.columnconfigure(1, weight=0)
+
+        left_sort_frame = tk.Frame(sort_frame, bg=PRIMARY)
+        left_sort_frame.grid(row=0, column=0, sticky='w')
+        tk.Label(left_sort_frame, width=12, text='Sort By:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w')
+        tk.Button(left_sort_frame, width=12, text='ID', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.set_customer_sort('id')).grid(row=0, column=1, padx=8)
+        tk.Button(left_sort_frame, width=12, text='First Name', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.set_customer_sort('first')).grid(row=0, column=2, padx=8)
+        tk.Button(left_sort_frame, width=12, text='Last Name', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.set_customer_sort('last')).grid(row=0, column=3, padx=8)
+
+        right_sort_frame = tk.Frame(sort_frame, bg=PRIMARY)
+        right_sort_frame.grid(row=0, column=1, sticky='e')
+        self.customer_sort_asc_btn = tk.Button(right_sort_frame, width=12, text='Ascending', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, command=lambda: self.set_customer_sort(self.customer_sort_key, ascending=True))
+        self.customer_sort_desc_btn = tk.Button(right_sort_frame, width=12, text='Descending', font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, command=lambda: self.set_customer_sort(self.customer_sort_key, ascending=False))
+        self.customer_sort_asc_btn.grid(row=0, column=0, padx=8)
+        self.customer_sort_desc_btn.grid(row=0, column=1, padx=8)
+        self.customer_sort_label = tk.Label(right_sort_frame, text='Current: ID ascending', font=REG_TEXT, bg=PRIMARY, fg=SECONDARY)
+        self.customer_sort_label.grid(row=0, column=2, padx=(12,0), sticky='e')
 
         self.refresh_customers()
 
@@ -2237,20 +2314,38 @@ class CustomersPage(tk.Frame):
         except Exception as e:
             messagebox.showerror('Search Error', str(e))
 
-    def sort_by(self, key):
+    def set_customer_sort(self, key=None, ascending=None):
         import db
         try:
+            if key is not None and key != self.customer_sort_key:
+                self.customer_sort_key = key
+            if ascending is not None:
+                self.customer_sort_desc = not ascending
+
             customers = list(db.get_customers())
-            if key == 'id':
-                customers.sort(key=lambda c: int(c['CustomerID']))
-            elif key == 'first':
-                customers.sort(key=lambda c: (dict(c).get('First_Name') or '').lower())
-            elif key == 'last':
-                customers.sort(key=lambda c: (dict(c).get('Last_Name') or '').lower())
+            if self.customer_sort_key == 'id':
+                customers.sort(key=lambda c: int(c['CustomerID']), reverse=self.customer_sort_desc)
+            elif self.customer_sort_key == 'first':
+                customers.sort(key=lambda c: (dict(c).get('First_Name') or '').lower(), reverse=self.customer_sort_desc)
+            elif self.customer_sort_key == 'last':
+                customers.sort(key=lambda c: (dict(c).get('Last_Name') or '').lower(), reverse=self.customer_sort_desc)
+            self.update_customer_sort_buttons()
             self.refresh_customers(customers)
         except Exception as e:
             from tkinter import messagebox
             messagebox.showerror('Sort Error', str(e))
+
+    def update_customer_sort_buttons(self):
+        if self.customer_sort_desc:
+            self.customer_sort_asc_btn.config(bg=PRIMARY, fg=SECONDARY)
+            self.customer_sort_desc_btn.config(bg=ACCENT, fg=PRIMARY)
+            direction = 'descending'
+        else:
+            self.customer_sort_asc_btn.config(bg=ACCENT, fg=PRIMARY)
+            self.customer_sort_desc_btn.config(bg=PRIMARY, fg=SECONDARY)
+            direction = 'ascending'
+        field_name = {'id': 'ID', 'first': 'First Name', 'last': 'Last Name'}.get(self.customer_sort_key, self.customer_sort_key)
+        self.customer_sort_label.config(text=f'Current: {field_name} {direction}')
 
     def _confirm_delete(self, iid):
         import db
