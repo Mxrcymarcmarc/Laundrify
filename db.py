@@ -475,13 +475,26 @@ def get_services():
             cursor.execute("SELECT ServiceID, Service_Type, Service_Unit_Price, Service_Unit_Price as Large_Unit_Price, IFNULL(Service_Unit,'pcs') as Service_Unit FROM SERVICES ORDER BY Service_Type")
         return cursor.fetchall()
 
+def get_next_service_id():
+    """Return the lowest unused ServiceID, filling any gaps left by deletions."""
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT ServiceID FROM SERVICES ORDER BY ServiceID")
+        existing = {row[0] for row in cursor.fetchall()}
+    candidate = 1
+    while candidate in existing:
+        candidate += 1
+    return candidate
+
+
 def add_service(service_type, unit_price, unit='pcs', large_price=None):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         l_price = int(large_price) if large_price is not None else int(unit_price)
-        cursor.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit, Large_Unit_Price) VALUES (?, ?, ?, ?)", (service_type, int(unit_price), unit, l_price))
+        new_id = get_next_service_id()
+        cursor.execute("INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Service_Unit, Large_Unit_Price) VALUES (?, ?, ?, ?, ?)", (new_id, service_type, int(unit_price), unit, l_price))
         conn.commit()
-        return cursor.lastrowid
+        return new_id
 
 def update_service(service_id, service_type, unit_price, unit='pcs', large_price=None):
     with sqlite3.connect("Laundrify.db") as conn:
@@ -492,12 +505,34 @@ def update_service(service_id, service_type, unit_price, unit='pcs', large_price
         return True
 
 def delete_service(service_id):
-    """Delete a service by its ID. Returns True on success."""
+    """Delete a service by its ID and resequence remaining ServiceIDs to maintain
+    a continuous numerical sequence. All foreign key references are updated."""
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM SERVICES WHERE ServiceID = ?", (service_id,))
+        if cursor.rowcount == 0:
+            conn.commit()
+            return False
+        # Resequence: shift all ServiceIDs above the deleted one down by 1
+        cursor.execute("SELECT ServiceID FROM SERVICES WHERE ServiceID > ? ORDER BY ServiceID", (service_id,))
+        ids_to_shift = [row[0] for row in cursor.fetchall()]
+        for old_id in ids_to_shift:
+            new_id = old_id - 1
+            cursor.execute("UPDATE SERVICES SET ServiceID = ? WHERE ServiceID = ?", (new_id, old_id))
+            cursor.execute("UPDATE ORDER_DETAILS SET ServiceID = ? WHERE ServiceID = ?", (new_id, old_id))
+            try:
+                cursor.execute("UPDATE ORDERS SET Composite_ServiceID = ? WHERE Composite_ServiceID = ?", (new_id, old_id))
+            except Exception:
+                pass
+        # Reset the autoincrement counter so it follows the new max
+        cursor.execute("SELECT MAX(ServiceID) FROM SERVICES")
+        max_row = cursor.fetchone()
+        max_id = max_row[0] if max_row and max_row[0] else 0
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name='SERVICES'")
+        if max_id > 0:
+            cursor.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('SERVICES', ?)", (max_id,))
         conn.commit()
-        return cursor.rowcount > 0
+        return True
 
 def restore_default_services():
     """Restore a curated default set of services and prices.
@@ -519,7 +554,8 @@ def restore_default_services():
             if row and row[0]:
                 cursor.execute("UPDATE SERVICES SET Service_Unit_Price = ?, Service_Unit = ?, Large_Unit_Price = ? WHERE ServiceID = ?", (int(price), unit, int(price), row[0]))
             else:
-                cursor.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Large_Unit_Price, Service_Unit) VALUES (?, ?, ?, ?)", (name, int(price), int(price), unit))
+                new_sid = get_next_service_id()
+                cursor.execute("INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Large_Unit_Price, Service_Unit) VALUES (?, ?, ?, ?, ?)", (new_sid, name, int(price), int(price), unit))
         conn.commit()
     return True
 
@@ -550,9 +586,10 @@ def get_or_create_combined_service(component_service_ids):
         id_to_name = {r[0]: r[1] for r in rows}
         names = [id_to_name.get(i, f"SVC#{i}") for i in ids]
         combo_name = ' + '.join(names)
-        cur.execute("INSERT INTO SERVICES (Service_Type, Service_Unit_Price, Service_Unit, Combo_Key) VALUES (?, ?, ?, ?)", (combo_name, 0, 'mixed', combo_key))
+        new_combo_id = get_next_service_id()
+        cur.execute("INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Service_Unit, Combo_Key) VALUES (?, ?, ?, ?, ?)", (new_combo_id, combo_name, 0, 'mixed', combo_key))
         conn.commit()
-        return cur.lastrowid
+        return new_combo_id
 
 
 
@@ -736,11 +773,12 @@ def create_order(customer_id, total_price, items, notes=""):
             if service_result:
                 service_id = service_result[0]
             else:
+                new_svc_id = get_next_service_id()
                 cursor.execute(
-                    "INSERT INTO SERVICES (Service_Type, Service_Unit_Price) VALUES (?, ?)",
-                    (item['service'], 0)
+                    "INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price) VALUES (?, ?, ?)",
+                    (new_svc_id, item['service'], 0)
                 )
-                service_id = cursor.lastrowid
+                service_id = new_svc_id
             
             # parse quantity string to numeric value and unit
             qty_raw = item.get('quantity', '')
@@ -905,9 +943,28 @@ def get_customer_details(customer_id):
 
 
 def delete_customer(customer_id):
+    """Delete a customer and resequence remaining CustomerIDs to maintain
+    a continuous numerical sequence. Foreign key references are updated."""
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM CUSTOMERS WHERE CustomerID = ?", (customer_id,))
+        if cursor.rowcount == 0:
+            conn.commit()
+            return True
+        # Resequence: shift all CustomerIDs above the deleted one down by 1
+        cursor.execute("SELECT CustomerID FROM CUSTOMERS WHERE CustomerID > ? ORDER BY CustomerID", (customer_id,))
+        ids_to_shift = [row[0] for row in cursor.fetchall()]
+        for old_id in ids_to_shift:
+            new_id = old_id - 1
+            cursor.execute("UPDATE CUSTOMERS SET CustomerID = ? WHERE CustomerID = ?", (new_id, old_id))
+            cursor.execute("UPDATE ORDERS SET CustomerID = ? WHERE CustomerID = ?", (new_id, old_id))
+        # Reset the autoincrement counter
+        cursor.execute("SELECT MAX(CustomerID) FROM CUSTOMERS")
+        max_row = cursor.fetchone()
+        max_id = max_row[0] if max_row and max_row[0] else 0
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name='CUSTOMERS'")
+        if max_id > 0:
+            cursor.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('CUSTOMERS', ?)", (max_id,))
         conn.commit()
         return True
 
@@ -1291,20 +1348,10 @@ def process_service_payment(order_id, service_id, amount_paid):
         }
 
 
-def get_next_customer_id():
-    """Fetches the highest CustomerID from the database and adds 1."""
-    conn = sqlite3.connect("Laundrify.db")
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT MAX(CustomerID) FROM CUSTOMERS")
-    result = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    return (result + 1) if result is not None else 1
-
-
 def delete_order(order_id):
+    """Delete an order and resequence remaining OrderIDs to maintain
+    a continuous numerical sequence. Foreign key references are updated.
+    Orphaned customers are also deleted (with their own resequencing)."""
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT CustomerID FROM ORDERS WHERE OrderID = ?", (order_id,))
@@ -1315,14 +1362,34 @@ def delete_order(order_id):
         cursor.execute("DELETE FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
         cursor.execute("DELETE FROM PAYMENTS WHERE OrderID = ?", (order_id,))
 
-        if customer_id:
-            cursor.execute("SELECT COUNT(*) FROM ORDERS WHERE CustomerID = ?", (customer_id,))
-            orders_left = cursor.fetchone()[0]
-            if orders_left == 0:
-                cursor.execute("DELETE FROM CUSTOMERS WHERE CustomerID = ?", (customer_id,))
+        # Resequence: shift all OrderIDs above the deleted one down by 1
+        cursor.execute("SELECT OrderID FROM ORDERS WHERE OrderID > ? ORDER BY OrderID", (order_id,))
+        ids_to_shift = [r[0] for r in cursor.fetchall()]
+        for old_id in ids_to_shift:
+            new_id = old_id - 1
+            cursor.execute("UPDATE ORDERS SET OrderID = ? WHERE OrderID = ?", (new_id, old_id))
+            cursor.execute("UPDATE ORDER_DETAILS SET OrderID = ? WHERE OrderID = ?", (new_id, old_id))
+            cursor.execute("UPDATE PAYMENTS SET OrderID = ? WHERE OrderID = ?", (new_id, old_id))
+        # Reset the autoincrement counter
+        cursor.execute("SELECT MAX(OrderID) FROM ORDERS")
+        max_row = cursor.fetchone()
+        max_id = max_row[0] if max_row and max_row[0] else 0
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name='ORDERS'")
+        if max_id > 0:
+            cursor.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('ORDERS', ?)", (max_id,))
 
         conn.commit()
-        return True
+
+    # Delete orphaned customer (with its own resequencing) outside the order connection
+    if customer_id:
+        with sqlite3.connect("Laundrify.db") as conn2:
+            c2 = conn2.cursor()
+            c2.execute("SELECT COUNT(*) FROM ORDERS WHERE CustomerID = ?", (customer_id,))
+            orders_left = c2.fetchone()[0]
+        if orders_left == 0:
+            delete_customer(customer_id)
+
+    return True
 
 
 def delete_service_row(order_id, service_id):
@@ -1339,17 +1406,9 @@ def delete_service_row(order_id, service_id):
         count, new_total = cursor.fetchone()
         
         if count == 0:
-            # Delete order entirely
-            cursor.execute("DELETE FROM ORDERS WHERE OrderID = ?", (order_id,))
-            cursor.execute("DELETE FROM PAYMENTS WHERE OrderID = ?", (order_id,))
-
-            if customer_id:
-                cursor.execute("SELECT COUNT(*) FROM ORDERS WHERE CustomerID = ?", (customer_id,))
-                orders_left = cursor.fetchone()[0]
-                if orders_left == 0:
-                    cursor.execute("DELETE FROM CUSTOMERS WHERE CustomerID = ?", (customer_id,))
-
+            # Delete order entirely (with resequencing handled by delete_order)
             conn.commit()
+            delete_order(order_id)
             return True, True  # success, parent order deleted
             
         # Update parent total price
