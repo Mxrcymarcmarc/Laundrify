@@ -64,13 +64,7 @@ def init_db():
             Payment_Date TEXT NOT NULL,
             FOREIGN KEY (OrderID) REFERENCES ORDERS(OrderID)
         )
-        """,
         """
-        CREATE TABLE IF NOT EXISTS SETTINGS (
-            SettingKey TEXT PRIMARY KEY,
-            SettingValue TEXT NULL
-        )
-        """,
     ]
 
     with sqlite3.connect("Laundrify.db") as conn:
