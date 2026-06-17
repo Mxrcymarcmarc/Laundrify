@@ -13,6 +13,25 @@ HDR2_TEXT = ("Arial Black", 15)
 TTL_TEXT = ("Arial", 11, "bold")
 REG_TEXT = ("Arial", 11)
 
+def format_db_date(date_str):
+    """Converts a raw database timestamp into a beautiful, readable format."""
+    if not date_str:
+        return ""
+    try:
+        from datetime import datetime
+        # Parse the raw format SQLite uses
+        dt = datetime.strptime(date_str.strip(), "%Y-%m-%d %H:%M:%S")
+        # %B = Full Month name, %d = Day, %Y = 4-digit Year, %I:%M %p = 12-hour time with AM/PM
+        return dt.strftime("%m/%d/%Y | %I:%M %p")
+    except Exception:
+        # Fallback if the date string is formatted slightly differently (e.g., date only)
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(date_str.strip(), "%Y-%m-%d")
+            return dt.strftime("%B %d, %Y")
+        except Exception:
+            return date_str # Return original string if parsing fails entirely
+
 def reload_services_for_page(page):
     """Populate page.service_map from DB and refresh the service combobox values."""
     import db
@@ -1576,24 +1595,26 @@ class ViewOrderPage(tk.Frame):
         pass
 
     def _insert_order_rows(self, tree, order, include_action=True):
-        """Insert a collapsible parent row with individual service child rows for mixed orders.
-        For single-service orders, insert a single flat row.
-        """
         import db
+        
+        # Pull details safely out of row dictionary records
         oid = order['OrderID']
-        date_str = order['Order_Received_At']
+        raw_date_str = order['Order_Received_At']
+        
+        # --- HERE IS THE FIX: FORMAT THE DISPLAY DATE ---
+        date_str = format_db_date(raw_date_str)
+        
         customer = f"{order['First_Name']} {order['Last_Name']}"
         status = order['Order_Status']
-        paid = "Yes" if order['Order_Paid_At'] else "No"
         total = order['Order_Total_Price']
+        paid = "Yes" if order['Order_Paid_At'] else "No"
 
         try:
             svc_rows = db.get_order_service_rows(oid)
         except Exception:
             svc_rows = []
-
+        
         parent_iid = str(oid)
-
         if not svc_rows:
             # Fallback: single generic row
             vals = [date_str, customer, "—", "—", status, f"₱{total}", paid]
@@ -1604,7 +1625,6 @@ class ViewOrderPage(tk.Frame):
             return
 
         is_mixed = len(svc_rows) > 1
-
         if not is_mixed:
             # Single-service order: display as flat row
             srow = svc_rows[0]
@@ -1627,6 +1647,7 @@ class ViewOrderPage(tk.Frame):
                 qty_sum = db.get_order_qty_display(oid)
             except Exception:
                 qty_sum = "—"
+                
             parent_vals = [
                 date_str,
                 customer,
@@ -1638,24 +1659,26 @@ class ViewOrderPage(tk.Frame):
             ]
             if include_action:
                 parent_vals.append('')
+                
             tag = "evenrow" if len(tree.get_children()) % 2 == 0 else "oddrow"
-            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(parent_vals), open=False, tags=('parent_mixed', tag))
-
-            for idx, srow in enumerate(svc_rows):
-                svc_iid = f"{oid}-{srow['service_id']}-{idx}"
+            tree.insert('', 'end', iid=parent_iid, text=str(oid), values=tuple(parent_vals), tags=(tag, 'parent_mixed'))
+            
+            # Populate underlying layout item details inside the folder dropdown rows
+            for srow in svc_rows:
+                child_iid = f"{oid}-{srow['service_id']}"
                 child_vals = [
-                    '',  # Date Received blank
-                    '',  # Customer blank
+                    "", # Intentionally blank to keep alignment clean under parent timestamp
+                    "",
                     srow['service_name'],
                     srow['qty_display'],
-                    srow['status'],  # Service status
-                    f"₱{srow['subtotal']:.0f}",
-                    srow['paid'],  # Service paid
+                    srow['status'],
+                    f"₱{srow['subtotal']}",
+                    srow['paid'],
                 ]
                 if include_action:
                     child_vals.append('')
-                tree.insert(parent_iid, 'end', iid=svc_iid, text=svc_iid, values=tuple(child_vals), tags=('child_service',))
-
+                tree.insert(parent_iid, 'end', iid=child_iid, text="", values=tuple(child_vals), tags=('child_service',))
+                
     def refresh_unpaid(self):
         import db
         tree = self.unpaid_tree
