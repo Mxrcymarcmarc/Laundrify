@@ -2561,7 +2561,7 @@ class ReportsPage(tk.Frame):
         
         self.current_tab = "revenue"
         tabs = {
-            "revenue": "Revenue Today",
+            "revenue": "Revenue This Week",
             "received": "Received Today",
             "ready": "Ready Today",
             "overdue": "Overdue",
@@ -2753,12 +2753,12 @@ class ReportsPage(tk.Frame):
             
             card1 = tk.Frame(kpi_frame, bg="#f0f8ff", bd=1, relief="solid", highlightbackground="#cce4ff", highlightthickness=1)
             card1.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
-            tk.Label(card1, text="Total Daily Revenue", font=("Arial", 10, "bold"), bg="#f0f8ff", fg="#3498db").pack(pady=(10, 0))
+            tk.Label(card1, text="Total Weekly Revenue", font=("Arial", 10, "bold"), bg="#f0f8ff", fg="#3498db").pack(pady=(10, 0))
             tk.Label(card1, text=f"₱{total_rev:,.2f}", font=("Arial", 18, "bold"), bg="#f0f8ff", fg="#2980b9").pack(pady=(0, 10))
             
             card2 = tk.Frame(kpi_frame, bg="#f0f8ff", bd=1, relief="solid", highlightbackground="#cce4ff", highlightthickness=1)
             card2.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
-            tk.Label(card2, text="Peak Hour Revenue", font=("Arial", 10, "bold"), bg="#f0f8ff", fg="#3498db").pack(pady=(10, 0))
+            tk.Label(card2, text="Peak Day Revenue", font=("Arial", 10, "bold"), bg="#f0f8ff", fg="#3498db").pack(pady=(10, 0))
             tk.Label(card2, text=f"₱{peak_rev:,.2f}", font=("Arial", 18, "bold"), bg="#f0f8ff", fg="#2980b9").pack(pady=(0, 10))
             
         elif report_type in ["received", "ready"]:
@@ -2795,7 +2795,7 @@ class ReportsPage(tk.Frame):
             
             if revenue and max(revenue) > 0:
                 peak_idx = revenue.index(max(revenue))
-                ax.annotate(f"Peak: ₱{max(revenue)}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=0.8, ec='none'))
+                ax.annotate(f"Peak: ₱{max(revenue):,.2f}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=0.8, ec='none'))
                 
         elif report_type == "received":
             bars = ax.bar(hours, data, color='#e67e22', alpha=0.8)
