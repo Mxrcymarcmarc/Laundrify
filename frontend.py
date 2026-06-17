@@ -2684,19 +2684,30 @@ class ReportsPage(tk.Frame):
             
         elif report_type == "overdue":
             from db import get_overdue_report_data
-            services, overdue_count = get_overdue_report_data()
-            total_overdue = sum(overdue_count) if overdue_count else 0
+            overdue_data = get_overdue_report_data()
+            
+            # Safely unpack depending on what backend returns
+            if isinstance(overdue_data, tuple):
+                overdue_count, normal_ready_count = overdue_data
+            else:
+                overdue_count = overdue_data
+                
+            total_overdue = overdue_count
             
             if total_overdue == 0:
                 msg = tk.Label(self.chart_frame, text="0 Overdue!\nAll caught up.", font=("Arial", 32, "bold"), bg="white", fg="#2ed573")
                 msg.grid(row=0, column=0, sticky="nsew", pady=100)
                 return
                 
+            # --- SOFTENED CONTEMPORARY KPI BANNER ---
             kpi_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-            kpi_card = tk.Frame(kpi_frame, bg="#fff0f0", bd=1, relief="solid", highlightbackground="#ffcccc", highlightthickness=1)
+            
+            # Removed bd=1 and relief="solid" line; added smooth visual styling properties
+            kpi_card = tk.Frame(kpi_frame, bg="#fff5f5", bd=1, relief="solid", highlightbackground="#e74c3c", highlightthickness=1)
             kpi_card.pack(fill="x", pady=5, padx=20)
-            tk.Label(kpi_card, text="URGENT ACTION CENTER", font=("Arial", 10, "bold"), bg="#fff0f0", fg="#e74c3c").pack(pady=(10, 0))
-            tk.Label(kpi_card, text=f"{total_overdue} Orders Overdue", font=("Arial", 16, "bold"), bg="#fff0f0", fg="#c0392b").pack(pady=(0, 10))
+            
+            tk.Label(kpi_card, text="URGENT ACTION CENTER", font=("Arial", 10, "bold"), bg="#fff5f5", fg="#e74c3c").pack(pady=(12, 2))
+            tk.Label(kpi_card, text=f"{total_overdue} Orders Overdue", font=("Arial", 16, "bold"), bg="#fff5f5", fg="#c0392b").pack(pady=(0, 12))
         
         elif report_type == "revenue":
             from db import get_revenue_report_data
@@ -2768,11 +2779,88 @@ class ReportsPage(tk.Frame):
             ax.grid(True, alpha=0.3, axis='y')
             
         elif report_type == "overdue":
-            wedges, texts, autotexts = ax.pie(overdue_count, labels=services, autopct='%1.1f%%', startangle=90, colors=['#e74c3c', '#e67e22', '#f1c40f', '#3498db'], wedgeprops=dict(width=0.4, edgecolor='w', linewidth=2))
-            plt.setp(autotexts, size=10, weight="bold", color="white")
-            ax.text(0, 0, f"{total_overdue}", ha='center', va='center', fontsize=28, fontweight='bold', color='#e74c3c')
-            ax.text(0, -0.2, "OVERDUE", ha='center', va='center', fontsize=10, fontweight='bold', color='#7f8c8d')
-            ax.set_title("Overdue Distribution", fontsize=14, fontweight='bold')
+            import db # Ensures access to the updated module namespace
+
+            # 1. Fetch breakdown numbers directly from db
+            overdue_data = db.get_overdue_report_data()
+            
+            # Safe parsing check
+            if isinstance(overdue_data, tuple):
+                overdue_count, normal_ready_count = overdue_data
+            else:
+                overdue_count = overdue_data
+                normal_ready_count = 0
+                
+            total_ready = overdue_count + normal_ready_count
+            
+            # Wipes out any previous drawings on this specific axis
+            ax.clear() 
+            
+            if total_ready == 0:
+                # Gray placeholder ring when there is no data at all
+                ax.pie([1], colors=['#bdc3c7'], radius=1, wedgeprops=dict(width=0.4, edgecolor='w'))
+                ax.text(0, 0, "0", ha='center', va='center', fontsize=20, fontweight='bold', color='#7f8c8d')
+                ax.text(0, -0.2, "TOTAL READY", ha='center', va='center', fontsize=8, fontweight='bold', color='#7f8c8d')
+                ax.set_title("Ready Order Status Breakdown", fontsize=14, fontweight='bold', pad=30)
+            else:
+                slices = [overdue_count, normal_ready_count]
+                slice_colors = ['#e74c3c', '#2ecc71']  # Red for Overdue, Green for On-Time Ready
+                
+                # Combine category and custom calculated percentage into a clean, uniform string literal
+                # This bypasses the default font artifact that shrinks the % symbol
+                pct_overdue = (overdue_count / total_ready) * 100
+                pct_ontime = (normal_ready_count / total_ready) * 100
+                
+                labels = [
+                    f"Overdue\n{pct_overdue:.1f}%",
+                    f"On-Time\n{pct_ontime:.1f}%"
+                ]
+                
+                legend_labels = [
+                    f'Overdue ({overdue_count} orders) — Passed pickup threshold',
+                    f'On-Time ({normal_ready_count} orders) — Safely within pickup window'
+                ]
+                
+                # Plotting the donut chart (Set autopct=None to avoid the native styling artifact)
+                wedges, texts = ax.pie(
+                    slices, 
+                    labels=labels,                     
+                    colors=slice_colors, 
+                    radius=1, 
+                    labeldistance=1.30,                 # Slightly increased breathing room outside the donut
+                    wedgeprops=dict(width=0.4, edgecolor='w')
+                )
+                
+                # FIX 1 & 3: Clean text contrast, sizing, and optical alignment adjustments
+                for i, text in enumerate(texts):
+                    text.set_color('#1a252f')          # Sharp charcoal text color
+                    text.set_fontsize(10.5)
+                    text.set_fontweight('bold')
+                    
+                    # Nudge the bottom label ("On-Time") slightly to the left to perfectly balance the alignment
+                    if i == 1: 
+                        x_pos, y_pos = text.get_position()
+                        text.set_position((x_pos + 0.25, y_pos - 0.10))  # Precise horizontal nudge
+                        text.set_horizontalalignment('center')    # Force precise bounding center anchor
+                
+                # FIX 2: Concentric centering fix inside the donut hole.
+                # Setting both lines to explicitly share a center anchor point prevents minor font-width offsets.
+                ax.text(0, 0.05, str(total_ready), ha='center', va='center', fontsize=28, fontweight='bold', color='#2c3e50')
+                ax.text(0, -0.18, "TOTAL READY", ha='center', va='center', fontsize=8, fontweight='bold', color='#7f8c8d')
+                
+                # Descriptive legend without a border box layout outline
+                ax.legend(
+                    wedges, 
+                    legend_labels, 
+                    loc="upper center", 
+                    bbox_to_anchor=(0.5, -0.18), 
+                    ncol=1, 
+                    frameon=False,
+                    fontsize=9
+                )
+                
+                # Title layout
+                ax.set_title("Ready Order Status Breakdown", fontsize=14, fontweight='bold', pad=30)
             
         elif report_type == "services":
             if not services:

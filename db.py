@@ -1132,28 +1132,38 @@ def get_ready_report_data():
     return hours_labels, order_counts
 
 def get_overdue_report_data():
-    # We hop through ORDER_DETAILS (OD) to bridge ORDERS (O) and SERVICES (S)
-    query = """
-        SELECT 
-            S.Service_Type,
-            COUNT(O.OrderID) as order_count
-        FROM ORDERS O
-        JOIN ORDER_DETAILS OD ON O.OrderID = OD.OrderID
-        JOIN SERVICES S ON OD.ServiceID = S.ServiceID
-        WHERE O.Order_Status = 'Overdue'
-        GROUP BY S.Service_Type
     """
+    Counts how many orders are dynamically overdue based on the current threshold
+    and returns a tuple of (overdue_count, normal_ready_count).
+    """
+    days_limit = OrderConfig.OVERDUE_DAYS
+    
+    # Ready orders that crossed the threshold
+    query_overdue = """
+        SELECT COUNT(*) FROM ORDERS 
+        WHERE Order_Status = 'Ready' 
+          AND Order_Ready_At <= datetime('now', ?)
+    """
+    
+    # Ready orders still safe within the time window
+    query_normal_ready = """
+        SELECT COUNT(*) FROM ORDERS 
+        WHERE Order_Status = 'Ready' 
+          AND Order_Ready_At > datetime('now', ?)
+    """
+    
+    param_string = f"-{days_limit} days"
     
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute(query)
-        raw_data = cursor.fetchall()
         
-    # Unpack into clean lists for your frontend pie chart
-    services = [row[0] for row in raw_data]
-    overdue_counts = [row[1] for row in raw_data]
-    
-    return services, overdue_counts
+        cursor.execute(query_overdue, (param_string,))
+        overdue_count = cursor.fetchone()[0]
+        
+        cursor.execute(query_normal_ready, (param_string,))
+        normal_ready_count = cursor.fetchone()[0]
+        
+    return overdue_count, normal_ready_count
 
 def get_top_services_report_data():
     # Counts occurrences of each service across all order details
