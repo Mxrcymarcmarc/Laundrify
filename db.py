@@ -1,9 +1,34 @@
 import sqlite3
+import os
 
 class OrderConfig:
     OVERDUE_DAYS = 7  # Simple backend variable configuration (default 7 days)
 
 from datetime import datetime
+
+
+def load_overdue_days_config():
+    """Reads the saved number from config.txt if it exists."""
+    try:
+        if os.path.exists("config.txt"):
+            with open("config.txt", "r") as f: # standard read mode 'r'
+                content = f.read().strip()
+                if content.isdigit():
+                    OrderConfig.OVERDUE_DAYS = int(content)
+    except Exception:
+        OrderConfig.OVERDUE_DAYS = 7  # Safe fallback if something goes wrong
+
+def update_overdue_days_config(days):
+    """Writes the new selection into config.txt so it's remembered."""
+    try:
+        with open("config.txt", "w") as f: # standard write mode 'w'
+            f.write(str(days))
+        OrderConfig.OVERDUE_DAYS = int(days)
+    except Exception as e:
+        print(f"Error saving configuration file: {e}")
+
+# Call the loader function right here so it executes the second the program starts!
+load_overdue_days_config()
 
 def init_db():
     tables = [

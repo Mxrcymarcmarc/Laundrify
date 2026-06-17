@@ -1878,9 +1878,19 @@ class ViewOrderPage(tk.Frame):
                 val = int(days_var.get().strip())
                 if val < 0:
                     raise ValueError
-                db.OrderConfig.OVERDUE_DAYS = val
+                
+                # Permanently save the configuration value to config.txt instead of changing DB tables
+                db.update_overdue_days_config(val)
+                
                 config_win.destroy()
-                self.refresh_all()  # Instantly update current view table rows to show status changes
+                self.refresh_all()  # Instantly update current view table rows
+                
+                # Force the ReportsPage to dynamically rebuild the donut chart right now
+                if hasattr(self, 'controller') and "ReportsPage" in self.controller.pages:
+                    self.controller.pages["ReportsPage"].show_report("overdue")
+                elif hasattr(self.master, 'pages') and "ReportsPage" in self.master.pages:
+                    self.master.pages["ReportsPage"].show_report("overdue")
+                    
             except ValueError:
                 from tkinter import messagebox
                 messagebox.showerror("Validation Error", "Please enter a valid positive integer number of days.")
