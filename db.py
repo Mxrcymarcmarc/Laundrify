@@ -1,7 +1,17 @@
+"""
+Laundrify - Database Layer
+
+This module provides utility functions and classes to interface with the SQLite database
+for the Laundrify application. It manages the lifecycle of tables (CUSTOMERS, SERVICES,
+ORDERS, ORDER_DETAILS, PAYMENTS), executes migrations, handles transactional order creation,
+processes payments, and generates analytics reports.
+"""
+
 import sqlite3
 import os
 
 class OrderConfig:
+    """Configuration class for storing backend order variables."""
     OVERDUE_DAYS = 7  # Simple backend variable configuration (default 7 days)
 
 from datetime import datetime
@@ -31,6 +41,12 @@ def update_overdue_days_config(days):
 load_overdue_days_config()
 
 def init_db():
+    """Initialize the SQLite database schema and perform migrations/seeds.
+    
+    Creates all necessary tables (CUSTOMERS, SERVICES, ORDERS, ORDER_DETAILS, PAYMENTS)
+    if they do not exist, runs database migrations (backfilling columns, migrating ID types),
+    and inserts default service items if the services table is empty.
+    """
     tables = [
         """
         CREATE TABLE IF NOT EXISTS CUSTOMERS (
@@ -646,6 +662,12 @@ def get_order_qty_display(order_id):
         return ' + '.join(parts)
 
 def get_services():
+    """Fetch all available services from the database.
+    
+    Returns:
+        list of sqlite3.Row: List of rows containing ServiceID, Service_Type,
+        Service_Unit_Price, Large_Unit_Price, and Service_Unit.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -668,6 +690,20 @@ def get_next_service_id():
 
 
 def add_service(service_type, unit_price, unit='pcs', large_price=None):
+    """Insert a new service into the database.
+    
+    Generates a unique ServiceID by finding the lowest unused ID gap,
+    normalizes the unit pricing structure, and saves the new service record.
+    
+    Args:
+        service_type (str): The name/type of service.
+        unit_price (int): Standard price of the service.
+        unit (str): Service measurement unit (e.g. 'pcs', 'kg', 'pack').
+        large_price (int, optional): Price for large pcs items. Defaults to unit_price.
+        
+    Returns:
+        int: The newly assigned ServiceID.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         l_price = None
@@ -679,6 +715,18 @@ def add_service(service_type, unit_price, unit='pcs', large_price=None):
         return new_id
 
 def update_service(service_id, service_type, unit_price, unit='pcs', large_price=None):
+    """Update details of an existing service in the database.
+    
+    Args:
+        service_id (int): ID of the service to edit.
+        service_type (str): New service name/type.
+        unit_price (int): New unit price.
+        unit (str): New measurement unit.
+        large_price (int, optional): New price for large pcs items.
+        
+    Returns:
+        bool: True if transaction committed successfully.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         l_price = None
@@ -977,6 +1025,11 @@ def create_order(customer_id, total_price, items, notes=""):
 
 
 def get_paid_orders():
+    """Fetch all orders that have been paid but not yet released.
+    
+    Returns:
+        list of sqlite3.Row: List of unpaid active orders.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -1012,6 +1065,11 @@ def get_overdue_orders():
 
 
 def get_archived_orders():
+    """Fetch all orders that are both paid and released (archived).
+    
+    Returns:
+        list of sqlite3.Row: List of archived completed orders.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -1028,6 +1086,15 @@ def get_archived_orders():
 
 # Date-range queries for search-by-date
 def get_unpaid_orders_by_date(start_date, end_date):
+    """Fetch unpaid orders received within a specific date range.
+    
+    Args:
+        start_date (str): Start date in ISO format (YYYY-MM-DD).
+        end_date (str): End date in ISO format (YYYY-MM-DD).
+        
+    Returns:
+        list of sqlite3.Row: Matching unpaid orders.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -1044,6 +1111,15 @@ def get_unpaid_orders_by_date(start_date, end_date):
         return cursor.fetchall()
 
 def get_paid_orders_by_date(start_date, end_date):
+    """Fetch paid but unreleased orders received within a specific date range.
+    
+    Args:
+        start_date (str): Start date in ISO format (YYYY-MM-DD).
+        end_date (str): End date in ISO format (YYYY-MM-DD).
+        
+    Returns:
+        list of sqlite3.Row: Matching paid orders.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -1060,6 +1136,15 @@ def get_paid_orders_by_date(start_date, end_date):
         return cursor.fetchall()
 
 def get_archived_orders_by_date(start_date, end_date):
+    """Fetch archived (paid and released) orders received within a specific date range.
+    
+    Args:
+        start_date (str): Start date in ISO format (YYYY-MM-DD).
+        end_date (str): End date in ISO format (YYYY-MM-DD).
+        
+    Returns:
+        list of sqlite3.Row: Matching archived orders.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -1077,6 +1162,19 @@ def get_archived_orders_by_date(start_date, end_date):
 
 
 def update_customer(customer_id, first_name, last_name, phone_number, email="", address=""):
+    """Update details for an existing customer record.
+    
+    Args:
+        customer_id (int): The ID of the customer to update.
+        first_name (str): Customer's updated first name.
+        last_name (str): Customer's updated last name.
+        phone_number (str): Customer's updated phone number.
+        email (str, optional): Customer's updated email. Defaults to "".
+        address (str, optional): Customer's updated address. Defaults to "".
+        
+    Returns:
+        bool: True if update committed successfully.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -1097,6 +1195,14 @@ def get_customers():
 
 
 def get_customer_details(customer_id):
+    """Fetch details of a customer by their ID.
+    
+    Args:
+        customer_id (int): The ID of the customer to retrieve.
+        
+    Returns:
+        sqlite3.Row: The customer record, or None if not found.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -1132,6 +1238,20 @@ def delete_customer(customer_id):
 
 
 def update_order(order_id, status=None, notes=None):
+    """Update parent order status and notes, cascading changes to order details.
+    
+    If the status changes, it updates the state on the parent order table and
+    cascades that status down to all child service records. Ready/Released timestamps
+    are also updated automatically.
+    
+    Args:
+        order_id (int): The ID of the order.
+        status (str, optional): New status string. Defaults to None.
+        notes (str, optional): Additional text notes to set. Defaults to None.
+        
+    Returns:
+        bool: True if transaction committed successfully.
+    """
     from datetime import datetime
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
@@ -1158,6 +1278,16 @@ def update_order(order_id, status=None, notes=None):
         return True
 
 def get_revenue_report_data():
+    """Retrieve daily revenue breakdown for the past 7 days (rolling week).
+    
+    Queries PAID orders from the last 6 days plus today, sums up order totals,
+    groups by day number, and maps values to Mon-Sun.
+    
+    Returns:
+        tuple: (ordered_days, ordered_revenue)
+            ordered_days (list of str): Weekday abbreviations.
+            ordered_revenue (list of float): Revenue numbers corresponding to each weekday.
+    """
     day_mapping = {
         '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', 
         '5': 'Fri', '6': 'Sat', '0': 'Sun'
@@ -1191,6 +1321,15 @@ def get_revenue_report_data():
     return ordered_days, ordered_revenue
 
 def get_received_report_data():
+    """Fetch order reception volume grouped into 3-hour daily buckets.
+    
+    Aggregates orders received today and buckets them into 6AM, 9AM, 12PM, 3PM, 6PM, 9PM.
+    
+    Returns:
+        tuple: (hours_labels, order_counts)
+            hours_labels (list of str): Formatted timezone bucket labels.
+            order_counts (list of int): Quantities of orders received in each bucket.
+    """
     target_hours = ["06", "09", "12", "15", "18", "21"]
     results_dict = {hr: 0 for hr in target_hours}
     
@@ -1225,6 +1364,15 @@ def get_received_report_data():
     return hours_labels, order_counts
 
 def get_ready_report_data():
+    """Fetch number of orders transitioned to 'Ready' state today, grouped by hour.
+    
+    Buckets order readiness times into the standard 6AM, 9AM, 12PM, 3PM, 6PM, 9PM time slots.
+    
+    Returns:
+        tuple: (hours, counts)
+            hours (list of str): Label names of time intervals.
+            counts (list of int): Total counts of orders completed in each interval.
+    """
     from datetime import datetime
     local_today = datetime.now().strftime('%Y-%m-%d')
 
@@ -1315,6 +1463,16 @@ def get_overdue_report_data():
     return overdue_count, normal_ready_count
 
 def get_top_services_report_data():
+    """Fetch and count service frequency usage across order items.
+    
+    Queries additional order detail lines and groups by Service_Name to measure
+    service performance popularity.
+    
+    Returns:
+        tuple: (services_list, counts_list)
+            services_list (list of str): Unique service names.
+            counts_list (list of int): Call/order counts matching each service name.
+    """
     import sqlite3
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
@@ -1337,6 +1495,11 @@ def get_top_services_report_data():
         return services_list, counts_list
 
 def get_top_customers_by_orders():
+    """Fetch top 10 customers based on order frequency count.
+    
+    Returns:
+        list of tuple: Ranking rows containing customer_name, total_orders, total_spent.
+    """
     query = """
         SELECT 
             C.First_Name || ' ' || C.Last_Name as customer_name,
@@ -1356,6 +1519,11 @@ def get_top_customers_by_orders():
         return cursor.fetchall()
 
 def get_top_customers_by_revenue():
+    """Fetch top 10 customers based on total cash volume spent.
+    
+    Returns:
+        list of tuple: Ranking rows containing customer_name, total_orders, total_spent.
+    """
     query = """
         SELECT 
             C.First_Name || ' ' || C.Last_Name as customer_name,
@@ -1498,6 +1666,14 @@ def get_order_service_rows(order_id):
 
 
 def is_service_paid(order_detail_id):
+    """Check if a specific service line item (by OrderDetailID) is paid.
+    
+    Args:
+        order_detail_id (str): The compound ID of the service item.
+        
+    Returns:
+        bool: True if the service item is marked as paid.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT Service_Paid_At FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
@@ -1508,6 +1684,19 @@ def is_service_paid(order_detail_id):
 
 
 def process_service_payment(order_detail_id, amount_paid):
+    """Process payment for an individual service line item.
+    
+    If the payment amount is sufficient, registers a payment transaction,
+    updates the service's paid timestamp, and checks if all sibling services
+    for this order are now paid (automatically updating the parent order's paid state).
+    
+    Args:
+        order_detail_id (str): The compound ID of the service item.
+        amount_paid (float): Amount of cash received.
+        
+    Returns:
+        dict: Status result containing success (bool), change (float), and message (str).
+    """
     from datetime import datetime
     
     with sqlite3.connect("Laundrify.db") as conn:
@@ -1616,6 +1805,20 @@ def delete_order(order_id):
 
 
 def delete_service_row(order_detail_id):
+    """Delete a specific service line item from an order.
+    
+    Deletes the item record, recalculates the parent order's total price,
+    status (Received/In-Progress/Ready/Released), and payment status.
+    If the order no longer has any items, the entire parent order is deleted.
+    
+    Args:
+        order_detail_id (str): Compound ID of the service item to delete.
+        
+    Returns:
+        tuple: (success, parent_order_deleted)
+            success (bool): Whether delete succeeded.
+            parent_order_deleted (bool): Whether parent order was cascade deleted.
+    """
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT OrderID FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
@@ -1681,6 +1884,23 @@ def delete_service_row(order_detail_id):
 
 
 def update_service_details(order_detail_id, weight, subtotal, status, paid_val, notes=""):
+    """Update database values for a specific service line item.
+    
+    Normalizes quantity formats, performs safety validations (e.g. preventing
+    releasing unpaid services), updates detail fields, and recalculates parent
+    order total price, status, and payment state.
+    
+    Args:
+        order_detail_id (str): Compound ID of the service item.
+        weight (str/float): Updated quantity weight/size string.
+        subtotal (float): Updated numeric subtotal.
+        status (str): Updated service status.
+        paid_val (bool): True if paid.
+        notes (str, optional): Additional item notes. Defaults to "".
+        
+    Returns:
+        bool: True if transaction committed successfully.
+    """
     from datetime import datetime
     
     if status == "Released" and not paid_val:

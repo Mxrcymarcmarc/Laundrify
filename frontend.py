@@ -1,3 +1,12 @@
+"""
+Laundrify - Frontend GUI Layer
+
+This module implements the user interface views and controllers for the Laundrify application
+using Tkinter. It defines custom layout controls (ScrollableGridTable), navigation pages
+(NewOrderPage, ViewOrderPage, CustomersPage, ReportsPage), forms validation, payments processing
+interfaces, and Matplotlib reports rendering.
+"""
+
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
@@ -86,7 +95,22 @@ def reload_services_for_page(page):
         pass
 
 class ScrollableGridTable(tk.Frame):
+    """A custom scrollable data table built using a Canvas containing nested Frames.
+    
+    Provides grid alignments, column configurations, mousewheel scrolling, row selection,
+    expanding/collapsing mixed multi-service rows, and callback hooks for edits/deletions.
+    """
     def __init__(self, parent, columns, include_action=True, edit_callback=None, delete_callback=None, double_click_callback=None):
+        """Initialize the ScrollableGridTable structure.
+        
+        Args:
+            parent (tk.Widget): Parent widget container.
+            columns (tuple): Column headers.
+            include_action (bool): Whether to show the Action buttons column. Defaults to True.
+            edit_callback (callable): Hook for Edit action click. Defaults to None.
+            delete_callback (callable): Hook for Delete action click. Defaults to None.
+            double_click_callback (callable): Hook for double click action on cells. Defaults to None.
+        """
         super().__init__(parent, bg="white")
         self.columns = columns
         self.include_action = include_action
@@ -187,6 +211,20 @@ class ScrollableGridTable(tk.Frame):
             pass
 
     def insert(self, parent, index, iid=None, text='', values=(), tags=(), open=False):
+        """Insert a row of cells into the table.
+        
+        Args:
+            parent (str): The iid of the parent row, if inserting a child service row.
+            index (str): Positioning (e.g. 'end').
+            iid (str, optional): Unique row identifier. Automatically generated if None.
+            text (str): Display text for the first column.
+            values (tuple): Cell values for subsequent columns.
+            tags (tuple): List of tagging keys for styling (e.g. 'evenrow', 'child_service').
+            open (bool): Expansion status for mixed rows.
+            
+        Returns:
+            str: The row's unique identifier (iid).
+        """
         if iid is None:
             import uuid
             iid = str(uuid.uuid4())
@@ -292,6 +330,11 @@ class ScrollableGridTable(tk.Frame):
         return iid
 
     def toggle_expand(self, iid):
+        """Toggle collapsed/expanded state of child service rows.
+        
+        Args:
+            iid (str): The unique row identifier to toggle.
+        """
         row_data = self.rows.get(iid)
         if not row_data: return
         is_open = not row_data['open']
@@ -329,6 +372,14 @@ class ScrollableGridTable(tk.Frame):
         return self.selected_iids
 
     def selection_set(self, iids):
+        """Select specific rows in the table.
+        
+        Applies a highlighted background color selection visual overlay to cells
+        within target row components.
+        
+        Args:
+            iids (list of str): List of row identifiers to select.
+        """
         for old_iid in self.selected_iids:
             if old_iid in self.rows:
                 row_data = self.rows[old_iid]
@@ -361,7 +412,20 @@ class ScrollableGridTable(tk.Frame):
 
 
 class App(tk.Frame):
+    """The main Tkinter application class acting as the controller frame.
+    
+    Houses global stylesheets, coordinates bottom navigation button clicks,
+    and facilitates raising/switching current visible page views.
+    """
     def __init__(self, parent, show_header=True, backend=None, title_callback=None):
+        """Initialize the root App controller frame.
+        
+        Args:
+            parent (tk.Widget): Parent Tkinter window container.
+            show_header (bool): Whether to build the default title bar header. Defaults to True.
+            backend (optional): Hook references. Defaults to None.
+            title_callback (callable, optional): Title updater function. Defaults to None.
+        """
         super().__init__(parent)
         self.backend = backend
         self.title_callback = title_callback or (lambda t: None)
@@ -442,6 +506,14 @@ class App(tk.Frame):
         self.show("NewOrderPage")
 
     def show(self, name):
+        """Raise the selected page to the top and refresh its contents.
+        
+        Updates navigation buttons to toggle selected/deselected styling,
+        calls the title_callback to rename header texts, and triggers pages refreshes.
+        
+        Args:
+            name (str): Class name of the page to show (e.g. 'NewOrderPage').
+        """
         titles = {
             "NewOrderPage": "Laundrify - New Order",
             "ViewOrderPage": "Laundrify - View Order",
@@ -473,7 +545,18 @@ class App(tk.Frame):
 
 
 class NewOrderPage(tk.Frame):           
+    """View container page for creating a new laundry order.
+    
+    Provides input forms to log customer profiles, select/customize services,
+    maintain a draft checklist of ordered items, and create order records.
+    """
     def __init__(self, parent, controller):
+        """Initialize NewOrderPage controls.
+        
+        Args:
+            parent (tk.Widget): Container parent notebook/frame.
+            controller (App): Reference to the parent App coordinator.
+        """
         super().__init__(parent, bd=0, relief="solid")
         # two-column main area like mockup
         self.columnconfigure(0, weight=1)
@@ -604,6 +687,12 @@ class NewOrderPage(tk.Frame):
         self.size_var = None
 
     def lookup_customer(self):
+        """Search for and retrieve an existing customer's contact details.
+        
+        If a numeric phone number is supplied, performs a direct match lookup.
+        Otherwise, launches a Selection Toplevel dialog with custom search boxes,
+        allowing the user to double-click or select a customer profile to auto-fill forms.
+        """
         import db
         from tkinter import messagebox
         # If phone entry has value, try to find directly
@@ -742,6 +831,12 @@ class NewOrderPage(tk.Frame):
         populate()
 
     def on_service_selected(self, event=None):
+        """Dynamically render input controls depending on the selected service unit type.
+        
+        For 'weight'-based services, displays a weight (kg) Entry field.
+        For 'size'-based services, displays radio selectors for Small/Large, and a quantity Entry.
+        For general 'item' services, displays a quantity Entry field.
+        """
         # Clear previous widgets in dynamic frame
         for widget in self.dynamic_frame.winfo_children():
             widget.destroy()
@@ -1105,6 +1200,11 @@ class NewOrderPage(tk.Frame):
                   command=restore_defaults).grid(row=0, column=3, sticky='ew', padx=4, ipady=4)
         
     def add_item(self):
+        """Validate inputs and add the current service selection to the order checklist.
+        
+        Calculates item price subtotal, formats unit labels, inserts the entry
+        into the draft items grid table, and locks customer input fields.
+        """
         from tkinter import messagebox
         
         if not self.validate_customer_info():
@@ -1243,6 +1343,12 @@ class NewOrderPage(tk.Frame):
             pass
 
     def create_order(self):
+        """Commit the draft order items and customer information to the database.
+        
+        Executes customer upsert queries, loops through order detail checklist records
+        to calculate grand totals, triggers database insertion, updates UI widgets to clear forms,
+        and unlocks editing fields.
+        """
         from tkinter import messagebox
         import db
         
@@ -1325,7 +1431,18 @@ class NewOrderPage(tk.Frame):
             messagebox.showerror("Error", f"Failed to create order: {str(e)}")
 
 class ViewOrderPage(tk.Frame):
+    """View container page for querying, tracking, and editing existing laundry orders.
+    
+    Provides sub-tab divisions for active Unpaid, Paid, and Archived orders, search filters,
+    payment flows, config editors for overdue parameters, and details editors.
+    """
     def __init__(self, parent, controller):
+        """Initialize the ViewOrderPage layout structure and its UI components.
+        
+        Args:
+            parent (tk.Widget): Container parent notebook/frame.
+            controller (App): Reference to the parent App coordinator.
+        """
         super().__init__(parent)
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
@@ -1547,6 +1664,7 @@ class ViewOrderPage(tk.Frame):
         self.refresh_all()
 
     def refresh_all(self):
+        """Reload and rebuild Unpaid, Paid, and Archived order data tables from the database."""
         self.refresh_unpaid()
         self.refresh_paid()
         self.refresh_archived()
@@ -1557,6 +1675,11 @@ class ViewOrderPage(tk.Frame):
             pass
 
     def on_tab_changed(self, event=None):
+        """Handle event when current notebook tab changes.
+        
+        Updates screen text header components to display the correct order type
+        and current record tally counts.
+        """
         # update subheading to show tab text and record count
         try:
             tab_text = self.notebook.tab(self.notebook.select(), option='text')
@@ -1993,7 +2116,11 @@ class ViewOrderPage(tk.Frame):
         ).pack(pady=15)
 
     def open_payment_window(self):
+        """Open a TopLevel modal payment dialog to process cash payments.
         
+        Supports full-order payment calculations or partial child-service transactions,
+        renders real-time change-received calculators, and updates parent-child tables.
+        """
         import db
         from tkinter import messagebox
 
@@ -2206,6 +2333,14 @@ class ViewOrderPage(tk.Frame):
 
     #FOR VIEW ORDER PAGE
     def open_edit_window(self, target_id):
+        """Open a TopLevel modal editor dialog to update details for a service item row.
+        
+        Loads service details, binds quantity-based price recalculators, allows status
+        transitions (e.g. Received -> Ready), and saves updates.
+        
+        Args:
+            target_id (str): The unique compound identifier of the service item.
+        """
         import db
         from tkinter import messagebox
         import sqlite3
@@ -2357,7 +2492,18 @@ class ViewOrderPage(tk.Frame):
         tk.Button(btn_frame, text='Confirm', command=save_changes, font=TTL_TEXT, bg=SECONDARY, fg=PRIMARY, height=2, cursor="hand2").grid(row=0, column=1, sticky='ew', padx=5)
 
 class CustomersPage(tk.Frame):
+    """View container page for managing and viewing customer records.
+    
+    Provides searching by ID or name, list sorting, and editing capabilities
+    for customer profiles.
+    """
     def __init__(self, parent, controller):
+        """Initialize the CustomersPage layout structure.
+        
+        Args:
+            parent (tk.Widget): Container parent notebook/frame.
+            controller (App): Reference to the parent App coordinator.
+        """
         super().__init__(parent)
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
@@ -2562,6 +2708,13 @@ class CustomersPage(tk.Frame):
     
     #FOR CUSTOMER PAGE
     def open_edit_window(self, iid):
+        """Open a TopLevel modal editor dialog to update customer details.
+        
+        Loads customer profile, renders inputs, and updates record details or deletes profile.
+        
+        Args:
+            iid (str): The unique CustomerID of the selected profile.
+        """
         import db
         from tkinter import messagebox
         cid = int(iid)
@@ -2632,7 +2785,19 @@ class CustomersPage(tk.Frame):
         tk.Button(btnf, text='Delete', command=do_delete, font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, cursor='hand2').grid(row=0, column=1, sticky='ew', padx=6)
 
 class ReportsPage(tk.Frame):
+    """View container page for generating analytics reports.
+    
+    Generates various reports including Weekly Revenue trends, Received volumes,
+    Ready orders count, Overdue rates, popular services, and customer rankings
+    using Matplotlib visualization charts.
+    """
     def __init__(self, parent, controller):
+        """Initialize the ReportsPage layout structure.
+        
+        Args:
+            parent (tk.Widget): Container parent notebook/frame.
+            controller (App): Reference to the parent App coordinator.
+        """
         super().__init__(parent)
         self.rowconfigure(1, weight=1)
         self.columnconfigure(0, weight=1)
@@ -2689,6 +2854,15 @@ class ReportsPage(tk.Frame):
                 btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
     
     def show_report(self, report_type):
+        """Build and render the selected report type visual chart.
+        
+        Loads dataset records, clears memory figures, constructs Matplotlib charts (plots,
+        bar charts, horizontal bars, or donut charts), wraps them inside Tkinter Canvas containers,
+        and adds hover tooltips.
+        
+        Args:
+            report_type (str): Key name of the report (e.g. 'revenue', 'services', 'overdue').
+        """
         import matplotlib.pyplot as plt
         
         # --- FIX: Close and clear all previous figures from memory before building the next one ---

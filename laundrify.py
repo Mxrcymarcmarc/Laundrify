@@ -1,3 +1,12 @@
+"""
+Laundrify - Application Entry Point
+
+This module serves as the bootstrap script for the Laundrify desktop application.
+It handles database initialization, splash screen presentation, Windows application
+grouping ID configuration, resource path resolution, and initial window management
+to embed and start the Tkinter frontend GUI.
+"""
+
 import tkinter as tk
 from tkinter import ttk
 import os
@@ -5,14 +14,22 @@ import db
 import ctypes
 import sys
 
-PRIMARY = "#F0EDE5"
-SECONDARY = "#4A6FA5"
-ACCENT = "#B8C5D6"
+# Styling theme configuration constants
+PRIMARY = "#F0EDE5"      # Light beige background
+SECONDARY = "#4A6FA5"    # Slate blue primary color
+ACCENT = "#B8C5D6"       # Steel gray accent color
 HDR_TEXT = ("Cooper Black", 24)
 REG_TEXT = ("Arial", 12)
 
 def get_asset_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
+    """Get absolute path to resource, works for dev and for PyInstaller.
+    
+    Args:
+        relative_path (str): The relative path to the asset file.
+        
+    Returns:
+        str: Absolute path to the asset resource.
+    """
     try:
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
@@ -21,18 +38,32 @@ def get_asset_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 def show_splash(root):
+    """Create and display an indeterminate splash screen.
+    
+    Creates a borderless TopLevel Tkinter window centered on the screen,
+    with a progress bar, logo, and title, to run while the main app starts.
+    
+    Args:
+        root (tk.Tk): The parent Tkinter root window instance.
+        
+    Returns:
+        tk.Toplevel: The created splash screen window instance.
+    """
     splash = tk.Toplevel()
-    splash.overrideredirect(True)
+    splash.overrideredirect(True) # Remove standard window decorations
     splash.configure(bg=PRIMARY)
-    splash.attributes('-topmost', True)
+    splash.attributes('-topmost', True) # Keep on top of other windows
     splash.lift()
 
+    # Outer border content frame
     content = tk.Frame(splash, bg=PRIMARY, bd=2, relief='ridge')
     content.pack(expand=True, fill='both', padx=10, pady=10)
 
+    # Header section container
     header_frame = tk.Frame(content, bg=PRIMARY)
     header_frame.pack(pady=(20, 10))
 
+    # Optional logo loading
     try:
         splash.logo_scaled = tk.PhotoImage(file=get_asset_path("Laundrify logo rounded.png"))
         logo_label = tk.Label(header_frame, image=splash.logo_scaled, bg=PRIMARY)
@@ -40,16 +71,19 @@ def show_splash(root):
     except Exception:
         pass
 
+    # Title and subtitle labels
     title_label = tk.Label(header_frame, text="Laundrify", font=("Cooper Black", 36), bg=PRIMARY, fg=SECONDARY)
     title_label.pack(side='left')
 
     subtitle_label = tk.Label(content, text="Preparing your experience...", font=("Arial", 14), bg=PRIMARY, fg=SECONDARY)
     subtitle_label.pack(pady=(0, 18))
 
+    # Animated progress bar
     progress = ttk.Progressbar(content, mode='indeterminate', length=320)
     progress.pack(pady=(0, 18))
     progress.start(12)
 
+    # Center the splash screen on the monitor
     width, height = 460, 220
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
@@ -63,10 +97,17 @@ def show_splash(root):
 
 
 def main():
+    """Application entry point function.
+    
+    Initializes the database schema, configures OS grouping layout rules,
+    configures window properties and icons, displays the splash screen,
+    and initializes the main application layout/views.
+    """
     import sys
     import os
 
     # 1. Force Windows to assign a fresh process grouping layout identity
+    # This ensures taskbar grouping and window icons display correctly on Windows OS
     try:
         myappid = 'laundrify.system.v2'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
@@ -103,11 +144,13 @@ def main():
     root.resizable(False, False)
     root.configure(bg=PRIMARY)
     
+    # Hide root window while splash is shown
     root.withdraw()
 
     splash = show_splash(root)
 
     def start_app():
+        """Destroy the splash screen, unhide the root window, and initialize page views."""
         splash.destroy()
         root.deiconify()
 
@@ -116,7 +159,7 @@ def main():
         
         page_title = "New Order"
         
-        # Header bar
+        # Header bar setup
         header_frame = tk.Frame(root, bg=SECONDARY)
         header_frame.grid(row=0, column=0, columnspan=2, sticky='ew')
         header_frame.columnconfigure(0, weight=1)
@@ -125,7 +168,7 @@ def main():
         label_header.grid(row=0, column=0, sticky='ew', pady=18)
         label_header.configure(anchor='center')
 
-        # embed the frontend App into the existing root
+        # Embed the frontend App into the existing root
         import frontend
 
         root.rowconfigure(0, weight=0)
@@ -133,12 +176,14 @@ def main():
         root.rowconfigure(2, weight=1)
 
         def set_title(t):
+            """Callback function to dynamically update header text when pages change."""
             label_header.config(text=t)
 
         app = frontend.App(root, show_header=False, title_callback=set_title)
         app.grid(row=2, column=0, columnspan=2, sticky='nsew')
         app.configure(bg=PRIMARY)
 
+    # Delay the start of the app by 1200ms to show splash screen transitions
     root.after(1200, start_app)
     root.mainloop()
     
