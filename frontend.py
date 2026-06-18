@@ -3018,6 +3018,9 @@ class ReportsPage(tk.Frame):
             from datetime import datetime
             
             ax.clear()
+            # Ensure the donut chart renders as a perfect circle instead of a stretched oval
+            ax.set_aspect('equal')
+            ax.axis('off')  # Turn off standard chart coordinate lines/axes labels completely
             
             today_str = datetime.now().strftime("%m/%d/%Y, %A")
 
@@ -3033,21 +3036,17 @@ class ReportsPage(tk.Frame):
                 
             total_ready = overdue_count + normal_ready_count
             
-            # Wipes out any previous drawings on this specific axis
-            ax.clear() 
-            
             if total_ready == 0:
                 # Gray placeholder ring when there is no data at all
                 ax.pie([1], colors=['#bdc3c7'], radius=1, wedgeprops=dict(width=0.4, edgecolor='w'))
                 ax.text(0, 0, "0", ha='center', va='center', fontsize=20, fontweight='bold', color='#7f8c8d')
-                ax.text(0, -0.2, "TOTAL READY", ha='center', va='center', fontsize=8, fontweight='bold', color="black")
+                ax.text(0, -0.2, "TOTAL READY", ha='center', va='center', fontsize=8, fontweight='bold', color="#7f8c8d")
                 ax.set_title(f"Ready Order Status Breakdown as of {today_str}", fontsize=14, fontweight='bold', pad=30)
             else:
                 slices = [overdue_count, normal_ready_count]
                 slice_colors = ['#e74c3c', '#2ecc71']  # Red for Overdue, Green for On-Time Ready
                 
-                # Combine category and custom calculated percentage into a clean, uniform string literal
-                # This bypasses the default font artifact that shrinks the % symbol
+                # Combine category and custom calculated percentage into a clean string literal
                 pct_overdue = (overdue_count / total_ready) * 100
                 pct_ontime = (normal_ready_count / total_ready) * 100
                 
@@ -3061,30 +3060,29 @@ class ReportsPage(tk.Frame):
                     f'On-Time ({normal_ready_count} orders) — Safely within pickup window'
                 ]
                 
-                # Plotting the donut chart (Set autopct=None to avoid the native styling artifact)
+                # Plotting the donut chart
                 wedges, texts = ax.pie(
                     slices, 
                     labels=labels,                     
                     colors=slice_colors, 
                     radius=1, 
-                    labeldistance=1.30,                 # Slightly increased breathing room outside the donut
+                    labeldistance=1.30,                 # Breathing room outside the donut
                     wedgeprops=dict(width=0.4, edgecolor='w')
                 )
                 
-                # FIX 1 & 3: Clean text contrast, sizing, and optical alignment adjustments
+                # Clean text contrast, sizing, and alignment adjustments
                 for i, text in enumerate(texts):
                     text.set_color('#1a252f')          # Sharp charcoal text color
                     text.set_fontsize(10.5)
                     text.set_fontweight('bold')
                     
-                    # Nudge the bottom label ("On-Time") slightly to the left to perfectly balance the alignment
+                    # Nudge the bottom label ("On-Time") slightly to balance alignment depending on layout
                     if i == 1: 
                         x_pos, y_pos = text.get_position()
-                        text.set_position((x_pos + 0.25, y_pos - 0.10))  # Precise horizontal nudge
-                        text.set_horizontalalignment('center')    # Force precise bounding center anchor
+                        text.set_position((x_pos + 0.25, y_pos - 0.05))
+                        text.set_horizontalalignment('center')
                 
-                # FIX 2: Concentric centering fix inside the donut hole.
-                # Setting both lines to explicitly share a center anchor point prevents minor font-width offsets.
+                # Centering total text layout cleanly inside the hole
                 ax.text(0, 0.05, str(total_ready), ha='center', va='center', fontsize=28, fontweight='bold', color='#2c3e50')
                 ax.text(0, -0.18, "TOTAL READY", ha='center', va='center', fontsize=8, fontweight='bold', color='#7f8c8d')
                 
@@ -3093,13 +3091,13 @@ class ReportsPage(tk.Frame):
                     wedges, 
                     legend_labels, 
                     loc="upper center", 
-                    bbox_to_anchor=(0.5, -0.18), 
+                    bbox_to_anchor=(0.5, -0.15), 
                     ncol=1, 
                     frameon=False,
                     fontsize=9
                 )
                 
-                # Title layout
+                # Title layout matching all your other tabs
                 ax.set_title(f"Ready Order Status Breakdown as of {today_str}", fontsize=14, fontweight='bold', pad=30)
             
         elif report_type == "services":

@@ -3,6 +3,7 @@ from tkinter import ttk
 import os
 import db
 import ctypes
+import sys
 
 PRIMARY = "#F0EDE5"
 SECONDARY = "#4A6FA5"
@@ -10,6 +11,14 @@ ACCENT = "#B8C5D6"
 HDR_TEXT = ("Cooper Black", 24)
 REG_TEXT = ("Arial", 12)
 
+def get_asset_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 def show_splash(root):
     splash = tk.Toplevel()
@@ -25,7 +34,7 @@ def show_splash(root):
     header_frame.pack(pady=(20, 10))
 
     try:
-        splash.logo_scaled = tk.PhotoImage(file="Laundrify logo rounded.png")
+        splash.logo_scaled = tk.PhotoImage(file=get_asset_path("Laundrify logo rounded.png"))
         logo_label = tk.Label(header_frame, image=splash.logo_scaled, bg=PRIMARY)
         logo_label.pack(side='left', padx=(0, 10))
     except Exception:
@@ -54,23 +63,42 @@ def show_splash(root):
 
 
 def main():
-    # Tell Windows to use our app's icon for the taskbar instead of Python's
+    import sys
+    import os
+
+    # 1. Force Windows to assign a fresh process grouping layout identity
     try:
-        myappid = 'laundrify.app.version1'
+        myappid = 'laundrify.system.v2'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except Exception:
         pass
+
+    # Helper function to find the logo asset inside the compiled .exe environment
+    def get_runtime_asset(relative_path):
+        try:
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
 
     # Initialize database
     db.init_db()
     
     root = tk.Tk()
     root.title('Laundrify')
+
+    # 2. Bind the extracted asset to the active window runtime instance
     try:
-        root.logo_icon = tk.PhotoImage(file="Laundrify logo rounded.png")
-        root.iconphoto(False, root.logo_icon)
+        # Use the helper path tracker to locate the extracted logo resource
+        logo_path = get_runtime_asset("Laundrify logo rounded.png")
+        
+        if os.path.exists(logo_path):
+            root.logo_icon = tk.PhotoImage(file=logo_path)
+            # Setting this to True ensures the window icon is inherited by the taskbar!
+            root.iconphoto(True, root.logo_icon)
     except Exception:
         pass
+        
     root.geometry('1500x750')
     root.resizable(False, False)
     root.configure(bg=PRIMARY)
