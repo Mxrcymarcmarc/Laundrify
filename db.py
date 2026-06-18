@@ -1225,45 +1225,60 @@ def get_received_report_data():
     return hours_labels, order_counts
 
 def get_ready_report_data():
-    target_hours = ["06", "09", "12", "15", "18", "21"]
-    results_dict = {hr: 0 for hr in target_hours}
-    
-    # Tailored to your exact schema columns: Order_Ready_At and Order_Status
-    query = """
-        SELECT 
-            strftime('%H', Order_Ready_At) as ready_hour,
-            COUNT(OrderID) as order_count
-        FROM ORDERS
-        WHERE Order_Status = 'Ready'
-        AND date(Order_Ready_At) = date('now')
-        GROUP BY ready_hour
-    """
-    
+    from datetime import datetime
+    local_today = datetime.now().strftime('%Y-%m-%d')
+
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute(query)
-        raw_data = cursor.fetchall()
-        
-    for raw_hour, count in raw_data:
-        if raw_hour is None:
-            continue
-            
-        hour_int = int(raw_hour)
-        if hour_int < 9: bucket = "06"
-        elif hour_int < 12: bucket = "09"
-        elif hour_int < 15: bucket = "12"
-        elif hour_int < 18: bucket = "15"
-        elif hour_int < 21: bucket = "18"
-        else: bucket = "21"
-        
-        results_dict[bucket] += count
 
-    display_mapping = {"06": "6AM", "09": "9AM", "12": "12PM", "15": "3PM", "18": "6PM", "21": "9PM"}
+        cursor.execute("""
+            SELECT strftime('%H', Order_Ready_At), COUNT(*) 
+            FROM ORDERS 
+            WHERE date(Order_Ready_At) = ?
+              AND Order_Status = 'Ready'
+            GROUP BY strftime('%H', Order_Ready_At)
+            ORDER BY strftime('%H', Order_Ready_At) ASC
+        """, (local_today,))
+        rows = cursor.fetchall()
+
+    # Define the 6 fixed intervals
+    time_divisions = {
+        '06': '6AM', '09': '9AM', '12': '12PM', 
+        '15': '3PM', '18': '6PM', '21': '9PM'
+    }
     
-    hours_labels = [display_mapping[hr] for hr in target_hours]
-    order_counts = [results_dict[hr] for hr in target_hours]
+    # Initialize all 6 intervals with 0 so they are guaranteed to exist
+    fixed_counts = {label: 0 for label in time_divisions.values()}
     
-    return hours_labels, order_counts
+    for r in rows:
+        hour_str = r[0]
+        count = r[1]
+        
+        if hour_str in time_divisions:
+            label = time_divisions[hour_str]
+            fixed_counts[label] += count
+        else:
+            # Round off-schedule hours to the closest interval bucket
+            hour_int = int(hour_str)
+            if hour_int < 9:
+                label = '6AM'
+            elif hour_int < 12:
+                label = '9AM'
+            elif hour_int < 15:
+                label = '12PM'
+            elif hour_int < 18:
+                label = '3PM'
+            elif hour_int < 21:
+                label = '6PM'
+            else:
+                label = '9PM'
+            fixed_counts[label] += count
+
+    # FIXED: Extract ALL 6 keys and values directly to preserve the complete structure
+    hours = list(fixed_counts.keys())
+    counts = list(fixed_counts.values())
+        
+    return hours, counts
 
 def get_overdue_report_data():
     """

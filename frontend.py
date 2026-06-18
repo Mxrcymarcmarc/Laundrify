@@ -2993,7 +2993,7 @@ class ReportsPage(tk.Frame):
                         ax.annotate(
                             f'{int(height)}',
                             xy=(bar.get_x() + bar.get_width() / 2, height),
-                            xytext=(0, 3),
+                            xytext=(0, 3),  # 3 points vertical offset
                             textcoords="offset points",
                             ha='center', va='bottom',
                             fontweight='bold', color='#2c3e50'
