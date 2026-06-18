@@ -2887,19 +2887,42 @@ class ReportsPage(tk.Frame):
         fig, ax = plt.subplots(figsize=(10, 4))
         
         if report_type == "revenue":
+            import db
+            from datetime import datetime
+            ax.clear()
+            
+            days, revenue = db.get_revenue_report_data()
+            
+            # Draw the graph lines exactly as you have them
             ax.plot(days, revenue, marker='o', linewidth=2, markersize=8, color='#3498db')
             ax.fill_between(range(len(days)), revenue, alpha=0.3, color='#3498db')
-            ax.set_title("Revenue Trend", fontsize=14, fontweight='bold')
+            
+            # FIXED: Get today's date and append it right next to your title text!
+            today_str = datetime.now().strftime("%m/%d/%Y, %A")
+            ax.set_title(f"Revenue Trend as of {today_str}", fontsize=14, fontweight='bold', pad=15)
+            
             ax.set_ylabel("Amount (₱)")
             ax.grid(True, alpha=0.3)
             
             if revenue and max(revenue) > 0:
                 peak_idx = revenue.index(max(revenue))
-                ax.annotate(f"Peak: ₱{max(revenue):,.2f}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=1.0, ec='none'))
-                
+                ax.annotate(f"Peak: ₱{max(revenue):,.2f}", 
+                            xy=(peak_idx, max(revenue)), 
+                            xytext=(0, 10), 
+                            textcoords='offset points', 
+                            ha='center', 
+                            fontweight='bold', 
+                            color='#2c3e50', 
+                            bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=1.0, ec='none'))
+                    
         elif report_type == "received":
             from matplotlib.ticker import MaxNLocator
             import db
+            from datetime import datetime
+            
+            ax.clear()
+            
+            today_str = datetime.now().strftime("%m/%d/%Y, %A")
             
             hours, counts = db.get_received_report_data()
             max_count = max(counts) if counts else 0
@@ -2908,7 +2931,7 @@ class ReportsPage(tk.Frame):
             if max_count == 0:
                 ax.text(0.5, 0.5, "No orders received today.", 
                         ha='center', va='center', fontsize=12, fontweight='bold', color='black')
-                ax.set_title("Orders Received Today (Hourly Breakdown)", fontsize=14, fontweight='bold', pad=20)
+                ax.set_title(f"Orders Received Today as of {today_str}", fontsize=14, fontweight='bold', pad=15)
                 ax.axis('off')  # Drops the grid and axes lines entirely
             else:
                 # 1. Plot the bar chart with your exact color
@@ -2928,7 +2951,7 @@ class ReportsPage(tk.Frame):
                         )
                 
                 # Set titles and labels
-                ax.set_title("Orders Received Today", fontsize=14, fontweight='bold', pad=20)
+                ax.set_title(f"Orders Received Today as of {today_str}", fontsize=14, fontweight='bold', pad=20)
                 ax.set_xlabel("Time of Day")
                 ax.set_ylabel("Number of Orders")
                 
@@ -2944,6 +2967,11 @@ class ReportsPage(tk.Frame):
         elif report_type == "ready":
             from matplotlib.ticker import MaxNLocator
             import db
+            from datetime import datetime
+            
+            ax.clear()
+            
+            today_str = datetime.now().strftime("%m/%d/%Y, %A")
             
             hours, counts = db.get_ready_report_data()
             max_count = max(counts) if counts else 0
@@ -2952,7 +2980,7 @@ class ReportsPage(tk.Frame):
             if max_count == 0:
                 ax.text(0.5, 0.5, "No orders ready for pickup today.", 
                         ha='center', va='center', fontsize=12, fontweight='bold', color="black")
-                ax.set_title("Orders Made Ready Today", fontsize=14, fontweight='bold', pad=20)
+                ax.set_title(f"Orders Made Ready Today as of {today_str}", fontsize=14, fontweight='bold', pad=20)
                 ax.axis('off')  # Drops the grid and axes lines entirely
             else:
                 # 1. Plot the bar chart (using your ready report's original color)
@@ -2972,7 +3000,7 @@ class ReportsPage(tk.Frame):
                         )
                 
                 # Set titles and labels
-                ax.set_title("Orders Made Ready Today", fontsize=14, fontweight='bold', pad=20)
+                ax.set_title(f"Orders Made Ready Today as of {today_str}", fontsize=14, fontweight='bold', pad=20)
                 ax.set_xlabel("Time of Day")
                 ax.set_ylabel("Number of Orders")
                 
@@ -2987,6 +3015,11 @@ class ReportsPage(tk.Frame):
             
         elif report_type == "overdue":
             import db # Ensures access to the updated module namespace
+            from datetime import datetime
+            
+            ax.clear()
+            
+            today_str = datetime.now().strftime("%m/%d/%Y, %A")
 
             # 1. Fetch breakdown numbers directly from db
             overdue_data = db.get_overdue_report_data()
@@ -3008,7 +3041,7 @@ class ReportsPage(tk.Frame):
                 ax.pie([1], colors=['#bdc3c7'], radius=1, wedgeprops=dict(width=0.4, edgecolor='w'))
                 ax.text(0, 0, "0", ha='center', va='center', fontsize=20, fontweight='bold', color='#7f8c8d')
                 ax.text(0, -0.2, "TOTAL READY", ha='center', va='center', fontsize=8, fontweight='bold', color="black")
-                ax.set_title("Ready Order Status Breakdown", fontsize=14, fontweight='bold', pad=30)
+                ax.set_title(f"Ready Order Status Breakdown as of {today_str}", fontsize=14, fontweight='bold', pad=30)
             else:
                 slices = [overdue_count, normal_ready_count]
                 slice_colors = ['#e74c3c', '#2ecc71']  # Red for Overdue, Green for On-Time Ready
@@ -3067,38 +3100,40 @@ class ReportsPage(tk.Frame):
                 )
                 
                 # Title layout
-                ax.set_title("Ready Order Status Breakdown", fontsize=14, fontweight='bold', pad=30)
+                ax.set_title(f"Ready Order Status Breakdown as of {today_str}", fontsize=14, fontweight='bold', pad=30)
             
         elif report_type == "services":
             import db
             from matplotlib.ticker import MaxNLocator
-            # 1. Clear any residual graphics layers
+            from datetime import datetime
             ax.clear()
             
-            # Unpack exactly using your native layout logic structure from line 2720
             services, count = db.get_top_services_report_data()
             
             if not services or len(services) == 0:
                 ax.text(0.5, 0.5, "No orders recorded yet to calculate top services.", 
-                        horizontalalignment='center', verticalalignment='center', fontsize=12, fontweight='bold', color='black')
-                ax.set_title("Top Services", fontsize=14, fontweight='bold', pad=20)
+                        horizontalalignment='center', verticalalignment='center', fontsize=12, fontweight='bold', color='#7f8c8d')
+                
+                # Update title here for empty state
+                today_str = datetime.now().strftime("%m/%d/%Y, %A")
+                ax.set_title(f"Top Services as of {today_str}", fontsize=14, fontweight='bold', pad=20)
                 ax.axis('off')
             else:
                 ax.axis('on')
-                
-                # 2. Pair them together for dynamic volume sorting
                 paired_data = list(zip(services, count))
                 sorted_pairs = sorted(paired_data, key=lambda x: int(x[1]))
                 
                 sorted_services = [item[0] for item in sorted_pairs]
                 sorted_count = [item[1] for item in sorted_pairs]
                 
-                # 3. Plot clean horizontal bars matching your original color specifications
                 bars = ax.barh(sorted_services, sorted_count, color='#9b59b6', alpha=0.8)
                 ax.bar_label(bars, fmt='%d', padding=3, color='#2c3e50', fontweight='bold')
                 
-                ax.set_title("Top Services", fontsize=14, fontweight='bold', pad=20)
-                ax.set_xlabel("Services Rendered")
+                # FIXED: Added the dynamic date right into your active title string!
+                today_str = datetime.now().strftime("%m/%d/%Y, %A")
+                ax.set_title(f"Top Services as of {today_str}", fontsize=14, fontweight='bold', pad=20)
+                
+                ax.set_xlabel("Orders")
                 ax.xaxis.set_major_locator(MaxNLocator(integer=True))
                 ax.grid(True, alpha=0.3, axis='x')
 
