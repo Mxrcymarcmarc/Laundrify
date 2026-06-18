@@ -67,7 +67,7 @@ def init_db():
         """,
         """
         CREATE TABLE IF NOT EXISTS ORDER_DETAILS (
-            OrderDetailID INTEGER PRIMARY KEY AUTOINCREMENT,
+            OrderDetailID TEXT PRIMARY KEY,
             OrderID INTEGER NOT NULL,
             ServiceID INTEGER NOT NULL,
             Order_Subtotal INTEGER NOT NULL,
@@ -137,11 +137,39 @@ def init_db():
             cursor.execute("ALTER TABLE SERVICES ADD COLUMN Combo_Key TEXT DEFAULT NULL")
         except Exception:
             pass
-        # Ensure ORDERS has Composite_ServiceID to point to a combined service record when order contains multiple services
-        try:
-            cursor.execute("ALTER TABLE ORDERS ADD COLUMN Composite_ServiceID INTEGER NULL")
-        except Exception:
-            pass
+
+        # Migration block for OrderDetailID: integer to text composite string format
+        cursor.execute("PRAGMA table_info(ORDER_DETAILS)")
+        for col in cursor.fetchall():
+            if col[1] == 'OrderDetailID' and col[2].upper() == 'INTEGER':
+                # Migration needed
+                cursor.execute("""
+                    CREATE TABLE ORDER_DETAILS_NEW (
+                        OrderDetailID TEXT PRIMARY KEY,
+                        OrderID INTEGER NOT NULL,
+                        ServiceID INTEGER NOT NULL,
+                        Order_Subtotal INTEGER NOT NULL,
+                        Item_Weight REAL NOT NULL,
+                        Item_Unit TEXT NOT NULL DEFAULT 'pcs',
+                        Service_Name TEXT DEFAULT '',
+                        Service_Status TEXT DEFAULT 'Received',
+                        Service_Paid_At TEXT DEFAULT NULL,
+                        Additional_Notes TEXT NULL,
+                        FOREIGN KEY (OrderID) REFERENCES ORDERS(OrderID),
+                        FOREIGN KEY (ServiceID) REFERENCES SERVICES(ServiceID)
+                    )
+                """)
+                cursor.execute("""
+                    INSERT INTO ORDER_DETAILS_NEW (OrderDetailID, OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name, Service_Status, Service_Paid_At, Additional_Notes)
+                    SELECT 
+                        CAST(OrderID AS TEXT) || '-' || CAST(ROW_NUMBER() OVER(PARTITION BY OrderID ORDER BY OrderDetailID) AS TEXT),
+                        OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name, Service_Status, Service_Paid_At, Additional_Notes
+                    FROM ORDER_DETAILS
+                """)
+                cursor.execute("DROP TABLE ORDER_DETAILS")
+                cursor.execute("ALTER TABLE ORDER_DETAILS_NEW RENAME TO ORDER_DETAILS")
+                break
+
         conn.commit()
 
     # Backfill Service_Status and Service_Paid_At for existing order details from ORDERS table
@@ -571,10 +599,7 @@ def delete_service(service_id):
             new_id = old_id - 1
             cursor.execute("UPDATE SERVICES SET ServiceID = ? WHERE ServiceID = ?", (new_id, old_id))
             cursor.execute("UPDATE ORDER_DETAILS SET ServiceID = ? WHERE ServiceID = ?", (new_id, old_id))
-            try:
-                cursor.execute("UPDATE ORDERS SET Composite_ServiceID = ? WHERE Composite_ServiceID = ?", (new_id, old_id))
-            except Exception:
-                pass
+
         # Reset the autoincrement counter so it follows the new max
         cursor.execute("SELECT MAX(ServiceID) FROM SERVICES")
         max_row = cursor.fetchone()
@@ -817,7 +842,9 @@ def create_order(customer_id, total_price, items, notes=""):
         )
         order_id = new_order_id
         
-        for item in items:
+        for idx, item in enumerate(items, start=1):
+            order_detail_id = f"{order_id}-{idx}"
+            
             cursor.execute("SELECT ServiceID FROM SERVICES WHERE Service_Type = ?", (item['service'],))
             service_result = cursor.fetchone()
             
@@ -868,16 +895,16 @@ def create_order(customer_id, total_price, items, notes=""):
             per_item_notes = item.get('notes', '') if isinstance(item, dict) else ''
             try:
                 cursor.execute(
-                    """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name, Additional_Notes) 
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''), per_item_notes)
+                    """INSERT INTO ORDER_DETAILS (OrderDetailID, OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name, Additional_Notes) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (order_detail_id, order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''), per_item_notes)
                 )
             except Exception:
                 # Fallback if Additional_Notes column doesn't exist yet
                 cursor.execute(
-                    """INSERT INTO ORDER_DETAILS (OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name) 
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''))
+                    """INSERT INTO ORDER_DETAILS (OrderDetailID, OrderID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit, Service_Name) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (order_detail_id, order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''))
                 )
         
         conn.commit()
@@ -1322,6 +1349,7 @@ def get_order_service_rows(order_id):
                     qty_display = s or '—'
 
         result.append({
+            'order_detail_id': row['OrderDetailID'],
             'service_id': row['ServiceID'],
             'service_name': sname,
             'qty_display': qty_display,
@@ -1333,22 +1361,22 @@ def get_order_service_rows(order_id):
     return result
 
 
-def is_service_paid(order_id, service_id):
+def is_service_paid(order_detail_id):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT Service_Paid_At FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+        cursor.execute("SELECT Service_Paid_At FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
         res = cursor.fetchone()
         return res and res[0] is not None
 
 
 
 
-def process_service_payment(order_id, service_id, amount_paid):
+def process_service_payment(order_detail_id, amount_paid):
     from datetime import datetime
     
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT OrderDetailID, Order_Subtotal, IFNULL(Service_Paid_At, '') FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+        cursor.execute("SELECT OrderDetailID, Order_Subtotal, IFNULL(Service_Paid_At, ''), OrderID FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
         row = cursor.fetchone()
         if not row:
             return {
@@ -1359,6 +1387,7 @@ def process_service_payment(order_id, service_id, amount_paid):
         odid = row[0]
         subtotal = row[1]
         already_paid = row[2] != ''
+        order_id = row[3]
         
         if already_paid:
             return {
@@ -1450,14 +1479,20 @@ def delete_order(order_id):
     return True
 
 
-def delete_service_row(order_id, service_id):
+def delete_service_row(order_detail_id):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT OrderID FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False, False
+        order_id = row[0]
+
         cursor.execute("SELECT CustomerID FROM ORDERS WHERE OrderID = ?", (order_id,))
         row = cursor.fetchone()
         customer_id = row[0] if row else None
 
-        cursor.execute("DELETE FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+        cursor.execute("DELETE FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
         
         # Check if any services remain for this order
         cursor.execute("SELECT COUNT(*), SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))
@@ -1509,7 +1544,7 @@ def delete_service_row(order_id, service_id):
         return True, False  # success, parent order NOT deleted
 
 
-def update_service_details(order_id, service_id, weight, subtotal, status, paid_val, notes=""):
+def update_service_details(order_detail_id, weight, subtotal, status, paid_val, notes=""):
     from datetime import datetime
     import re
     
@@ -1543,10 +1578,15 @@ def update_service_details(order_id, service_id, weight, subtotal, status, paid_
 
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT OrderID FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
+        order_row = cursor.fetchone()
+        if not order_row:
+            return
+        order_id = order_row[0]
         
         # Determine paid timestamp
         if paid_val:
-            cursor.execute("SELECT Service_Paid_At FROM ORDER_DETAILS WHERE OrderID = ? AND ServiceID = ?", (order_id, service_id))
+            cursor.execute("SELECT Service_Paid_At FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
             curr_paid = cursor.fetchone()
             if curr_paid and curr_paid[0]:
                 paid_at = curr_paid[0]
@@ -1558,8 +1598,8 @@ def update_service_details(order_id, service_id, weight, subtotal, status, paid_
         cursor.execute("""
             UPDATE ORDER_DETAILS
             SET Item_Weight = ?, Item_Unit = ?, Order_Subtotal = ?, Service_Status = ?, Service_Paid_At = ?, Additional_Notes = ?
-            WHERE OrderID = ? AND ServiceID = ?
-        """, (qty_value, unit, subtotal, status, paid_at, notes, order_id, service_id))
+            WHERE OrderDetailID = ?
+        """, (qty_value, unit, subtotal, status, paid_at, notes, order_detail_id))
         
         # Recalculate parent order price
         cursor.execute("SELECT SUM(Order_Subtotal) FROM ORDER_DETAILS WHERE OrderID = ?", (order_id,))

@@ -1559,12 +1559,11 @@ class ViewOrderPage(tk.Frame):
         if is_child:
             try:
                 oid = int(str(iid).split('-')[0])
-                svc_id = int(str(iid).split('-')[1])
             except Exception:
                 return
             if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete this service line from Order {oid}?"):
                 try:
-                    success, parent_deleted = db.delete_service_row(oid, svc_id)
+                    success, parent_deleted = db.delete_service_row(iid)
                     if parent_deleted:
                         messagebox.showinfo("Deleted", f"Service line deleted. The entire Order {oid} has been deleted since no services remain.")
                     else:
@@ -1662,7 +1661,7 @@ class ViewOrderPage(tk.Frame):
             
             # Populate underlying layout item details inside the folder dropdown rows
             for srow in svc_rows:
-                child_iid = f"{oid}-{srow['service_id']}"
+                child_iid = srow['order_detail_id']
                 child_vals = [
                     "", # Intentionally blank to keep alignment clean under parent timestamp
                     "",
@@ -1752,7 +1751,7 @@ class ViewOrderPage(tk.Frame):
 
             # 3. Match by child service ID (exact: e.g. "1-2") or by parent ID prefix (e.g. "1" matches "1-1", "1-2")
             for srow in svc_rows:
-                child_iid = f"{oid}-{srow['service_id']}"
+                child_iid = srow['order_detail_id']
                 # Exact child ID match (e.g. search "1-2") OR parent ID search (e.g. search "1" matches "1-N")
                 if term == child_iid or (term == str(oid)):
                     order_matched = True
@@ -2002,9 +2001,8 @@ class ViewOrderPage(tk.Frame):
                 try:
                     parts = q.split('-')
                     oid_clean = int(parts[0])
-                    svc_id = int(parts[1])
                     svc_rows = db.get_order_service_rows(oid_clean)
-                    target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+                    target_svc = next((sr for sr in svc_rows if sr['order_detail_id'] == q), None)
                     if target_svc:
                         amount_due_display.config(text=f"₱{target_svc['subtotal']:.2f}")
                         cash_entry.delete(0, tk.END)
@@ -2046,9 +2044,8 @@ class ViewOrderPage(tk.Frame):
             try:
                 oid_clean = selected_order_id.split('-')[0]
                 if '-' in selected_order_id:
-                    svc_id = int(selected_order_id.split('-')[1])
                     svc_rows = db.get_order_service_rows(int(oid_clean))
-                    target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+                    target_svc = next((sr for sr in svc_rows if sr['order_detail_id'] == selected_order_id), None)
                     if target_svc:
                         initial_amount = f"₱{target_svc['subtotal']:.2f}"
                 else:
@@ -2080,9 +2077,7 @@ class ViewOrderPage(tk.Frame):
             try:
                 cash = float(cash_str)
                 if '-' in order_id:
-                    oid_clean = order_id.split('-')[0]
-                    svc_id = int(order_id.split('-')[1])
-                    result = db.process_service_payment(int(oid_clean), svc_id, cash)
+                    result = db.process_service_payment(order_id, cash)
                 else:
                     result = db.process_payment(int(order_id), cash)
                 if not result['success']:
@@ -2121,7 +2116,6 @@ class ViewOrderPage(tk.Frame):
         is_child = '-' in str(target_id)
         if is_child:
             oid = int(str(target_id).split('-')[0])
-            svc_id = int(str(target_id).split('-')[1])
         else:
             oid = int(target_id)
 
@@ -2139,7 +2133,7 @@ class ViewOrderPage(tk.Frame):
         # Retrieve the service row we are editing
         svc_rows = db.get_order_service_rows(oid)
         if is_child:
-            target_svc = next((sr for sr in svc_rows if sr['service_id'] == svc_id), None)
+            target_svc = next((sr for sr in svc_rows if sr['order_detail_id'] == target_id), None)
         else:
             target_svc = svc_rows[0] if svc_rows else None
 
@@ -2247,8 +2241,7 @@ class ViewOrderPage(tk.Frame):
                 status = status_combo.get()
                 paid_val = paid_combo.get() == "Yes"
                 notes = notes_text.get("1.0", "end-1c").strip()
-                
-                db.update_service_details(oid, target_svc['service_id'], qty_val, subtotal, status, paid_val, notes)
+                db.update_service_details(target_svc['order_detail_id'], qty_val, subtotal, status, paid_val, notes)
                 messagebox.showinfo('Saved', 'Service details updated')
                 edit_win.destroy()
                 self.refresh_all()
