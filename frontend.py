@@ -32,15 +32,27 @@ def format_db_date(date_str):
         except Exception:
             return date_str # Return original string if parsing fails entirely
 
+def center_window(window, width, height):
+    """Centers the given Tkinter window on the screen with the specified width and height."""
+    window.update_idletasks()
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    x = (screen_width - width) // 2
+    y = (screen_height - height) // 2
+    window.geometry(f"{width}x{height}+{x}+{y}")
+
 def reload_services_for_page(page):
     """Populate page.service_map from DB and refresh the service combobox values."""
     import db
     # base defaults
     page.service_map = {
-        "Wash, Dry & Fold": ("weight", 70),
-        "Wash & Dry": ("weight", 50),
-        "Dry Cleaning": ("size", {"small": 110, "large": 150}),
-        "Ironing": ("size", {"small": 20, "large": 30})
+        "Wash, Dry & Fold": ("weight", 70, "kg"),
+        "Wash & Dry": ("weight", 50, "kg"),
+        "Dry Cleaning": ("size", {"small": 110, "large": 150}, "pcs"),
+        "Ironing": ("size", {"small": 20, "large": 30}, "pcs"),
+        "Detergent": ("item", 15, "pack"),
+        "Bleach": ("item", 15, "pack"),
+        "Fabric Softener": ("item", 15, "pack")
     }
     try:
         services = db.get_services()
@@ -60,10 +72,11 @@ def reload_services_for_page(page):
             except Exception:
                 unit = 'pcs'
             if unit == 'kg':
-                page.service_map[name] = ('weight', price)
+                page.service_map[name] = ('weight', price, 'kg')
+            elif unit == 'pcs':
+                page.service_map[name] = ('size', {'small': price, 'large': l_price}, 'pcs')
             else:
-                # for pcs show size radios by default (small/large)
-                page.service_map[name] = ('size', {'small': price, 'large': l_price})
+                page.service_map[name] = ('item', price, unit)
     except Exception:
         pass
     # update combobox values if combobox exists
@@ -513,10 +526,13 @@ class NewOrderPage(tk.Frame):
         tk.Label(left, text="Service:", font=TTL_TEXT, bg=PRIMARY).grid(row=6, column=0, sticky="w")
         # default in-code service map (used for UI behavior). Prices will be updated from DB if available.
         self.service_map = {
-            "Wash, Dry & Fold": ("weight", 70),
-            "Wash & Dry": ("weight", 50),
-            "Dry Cleaning": ("size", {"small": 110, "large": 150}),
-            "Ironing": ("size", {"small": 20, "large": 30})
+            "Wash, Dry & Fold": ("weight", 70, "kg"),
+            "Wash & Dry": ("weight", 50, "kg"),
+            "Dry Cleaning": ("size", {"small": 110, "large": 150}, "pcs"),
+            "Ironing": ("size", {"small": 20, "large": 30}, "pcs"),
+            "Detergent": ("item", 15, "pack"),
+            "Bleach": ("item", 15, "pack"),
+            "Fabric Softener": ("item", 15, "pack")
         }
         # Load services from DB and refresh combobox
         reload_services_for_page(self)
@@ -543,8 +559,8 @@ class NewOrderPage(tk.Frame):
         add_btn.grid(row=9, column=1, pady=10)
 
         # Lookup existing customer and autofill fields
-        lookup_btn = tk.Button(left, text="Lookup Customer", font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, command=self.lookup_customer, width=20)
-        lookup_btn.grid(row=10, column=1, pady=(0,10))
+        self.lookup_btn = tk.Button(left, text="Lookup Customer", font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, command=self.lookup_customer, width=20)
+        self.lookup_btn.grid(row=10, column=1, pady=(0,10))
 
         # right - instructions and order items area
         # header with Instruction label and gear button on same row
@@ -613,7 +629,7 @@ class NewOrderPage(tk.Frame):
         # Otherwise show a selection window with treeview to pick a customer
         sel_win = tk.Toplevel(self)
         sel_win.title('Select Customer')
-        sel_win.geometry('1100x550')
+        center_window(sel_win, 1100, 550)
         sel_win.configure(bg=PRIMARY)
         sel_win.grab_set()
         sel_win.rowconfigure(1, weight=1); sel_win.columnconfigure(0, weight=1)
@@ -734,7 +750,7 @@ class NewOrderPage(tk.Frame):
         if not service:
             return
 
-        service_type, pricing = self.service_map[service]
+        service_type, pricing, unit = self.service_map[service]
 
         if service_type == "weight":
             # Show weight entry field
@@ -788,7 +804,7 @@ class NewOrderPage(tk.Frame):
                 self.size_var = None
                 # show unit price
                 try:
-                    self.unit_price_var.set(f"Unit price: ₱{float(pricing):.2f}")
+                    self.unit_price_var.set(f"Unit price: ₱{float(pricing):.2f} / {unit}")
                 except Exception:
                     self.unit_price_var.set("")
     
@@ -850,7 +866,7 @@ class NewOrderPage(tk.Frame):
         from tkinter import messagebox
         svc_win = tk.Toplevel(self)
         svc_win.title('Manage Services')
-        svc_win.geometry('520x460')
+        center_window(svc_win, 520, 460)
         svc_win.resizable(False, False)
         svc_win.configure(bg=PRIMARY)
         svc_win.grab_set()
@@ -888,38 +904,78 @@ class NewOrderPage(tk.Frame):
         form = tk.Frame(container, bg=PRIMARY)
         form.grid(row=3, column=0, columnspan=2, sticky='ew')
         form.columnconfigure(1, weight=1)
+        form.columnconfigure(3, weight=1)
 
         tk.Label(form, text='Service Type:', font=TTL_TEXT, bg=PRIMARY).grid(row=0, column=0, sticky='w', pady=3)
         svc_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
-        svc_entry.grid(row=0, column=1, sticky='ew', pady=3, ipady=2)
+        svc_entry.grid(row=0, column=1, columnspan=3, sticky='ew', pady=3, ipady=2)
 
         tk.Label(form, text='Unit:', font=TTL_TEXT, bg=PRIMARY).grid(row=1, column=0, sticky='w', pady=3)
-        unit_combo = ttk.Combobox(form, values=['pcs', 'kg'], state='readonly', width=8, font=REG_TEXT)
+        unit_combo = ttk.Combobox(form, state='readonly', width=8, font=REG_TEXT)
         unit_combo.grid(row=1, column=1, sticky='w', pady=3)
 
+        new_unit_lbl = tk.Label(form, text='New Unit Type:', font=TTL_TEXT, bg=PRIMARY)
+        new_unit_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
+
         price_lbl = tk.Label(form, text='Small Price (₱):', font=TTL_TEXT, bg=PRIMARY)
-        price_lbl.grid(row=2, column=0, sticky='w', pady=3)
         price_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
-        price_entry.grid(row=2, column=1, sticky='ew', pady=3, ipady=2)
 
         large_lbl = tk.Label(form, text='Large Price (₱):', font=TTL_TEXT, bg=PRIMARY)
-        large_lbl.grid(row=2, column=0, sticky='w', pady=3)
         large_entry = tk.Entry(form, font=REG_TEXT, highlightthickness=2, highlightcolor=SECONDARY)
 
         # Track the selected service name for the delete button label
         delete_btn_text = tk.StringVar(value='Delete')
 
+        def refresh_unit_combo_values():
+            existing_units = set()
+            try:
+                for s in db.get_services():
+                    u = s['Service_Unit']
+                    if u:
+                        existing_units.add(u.strip().lower())
+            except Exception:
+                pass
+            base_units = ['pcs', 'kg']
+            for u in base_units:
+                existing_units.discard(u)
+            sorted_custom = sorted(list(existing_units))
+            combo_vals = base_units + sorted_custom + ['New Unit']
+            unit_combo['values'] = combo_vals
+
+        refresh_unit_combo_values()
+
         def on_unit_change(event=None):
-            if unit_combo.get() == 'pcs':
+            # Forget all dynamic fields first to clear any span/column options
+            new_unit_lbl.grid_forget()
+            new_unit_entry.grid_forget()
+            price_lbl.grid_forget()
+            price_entry.grid_forget()
+            large_lbl.grid_forget()
+            large_entry.grid_forget()
+
+            val = unit_combo.get()
+            if not val:
+                return
+            elif val == 'pcs':
                 price_lbl.config(text='Small Price (₱):')
-                large_lbl.grid(row=3, column=0, sticky='w', pady=3)
-                large_entry.grid(row=3, column=1, sticky='ew', pady=3, ipady=2)
-            else:
+                price_lbl.grid(row=2, column=0, sticky='w', pady=3)
+                price_entry.grid(row=2, column=1, sticky='ew', pady=3, ipady=2)
+                large_lbl.grid(row=2, column=2, sticky='w', pady=3, padx=(10, 0))
+                large_entry.grid(row=2, column=3, sticky='ew', pady=3, ipady=2)
+            elif val == 'New Unit':
+                new_unit_lbl.grid(row=2, column=0, sticky='w', pady=3)
+                new_unit_entry.grid(row=2, column=1, sticky='ew', pady=3, ipady=2)
                 price_lbl.config(text='Unit Price (₱):')
-                large_lbl.grid_forget()
-                large_entry.grid_forget()
+                price_lbl.grid(row=2, column=2, sticky='w', pady=3, padx=(10, 0))
+                price_entry.grid(row=2, column=3, sticky='ew', pady=3, ipady=2)
+            else:
+                # E.g. 'kg' or custom units like 'pack'
+                price_lbl.config(text='Unit Price (₱):')
+                price_lbl.grid(row=2, column=0, sticky='w', pady=3)
+                price_entry.grid(row=2, column=1, columnspan=3, sticky='ew', pady=3, ipady=2)
 
         unit_combo.bind('<<ComboboxSelected>>', on_unit_change)
+        on_unit_change() # Hide price fields initially
 
         def load_services():
             for i in tree.get_children():
@@ -943,9 +999,14 @@ class NewOrderPage(tk.Frame):
             price_entry.delete(0, tk.END); price_entry.insert(0, vals[1])
             large_entry.delete(0, tk.END); large_entry.insert(0, vals[3])
             try:
-                unit_combo.set(vals[2])
+                unit_val = vals[2]
+                if unit_val not in unit_combo['values']:
+                    refresh_unit_combo_values()
+                unit_combo.set(unit_val)
+                new_unit_entry.delete(0, tk.END)
             except Exception:
                 unit_combo.set('pcs')
+                new_unit_entry.delete(0, tk.END)
             on_unit_change()
             # Update delete button label
             delete_btn_text.set(f'Delete "{vals[0]}"')
@@ -956,10 +1017,9 @@ class NewOrderPage(tk.Frame):
             svc_entry.delete(0, tk.END)
             price_entry.delete(0, tk.END)
             large_entry.delete(0, tk.END)
+            new_unit_entry.delete(0, tk.END)
             unit_combo.set('')
-            large_lbl.grid_forget()
-            large_entry.grid_forget()
-            price_lbl.config(text='Small Price (₱):')
+            on_unit_change()
             for sel in tree.selection():
                 tree.selection_remove(sel)
             delete_btn_text.set('Delete')
@@ -968,6 +1028,14 @@ class NewOrderPage(tk.Frame):
             name = svc_entry.get().strip()
             price = price_entry.get().strip()
             unit = unit_combo.get() or 'pcs'
+            if unit == 'New Unit':
+                unit = new_unit_entry.get().strip().lower()
+                if not unit:
+                    messagebox.showwarning('Missing', 'Please enter a unit type name', parent=svc_win)
+                    return
+                if unit in ['pcs', 'kg']:
+                    messagebox.showwarning('Invalid', f"Please select '{unit}' directly from the dropdown instead", parent=svc_win)
+                    return
             large_price = large_entry.get().strip() if unit == 'pcs' else price
             if not name or not price:
                 messagebox.showwarning('Missing', 'Please enter service name and price', parent=svc_win)
@@ -985,6 +1053,7 @@ class NewOrderPage(tk.Frame):
                 db.add_service(name, price_val, unit, l_price_val)
             load_services()
             clear_form()
+            refresh_unit_combo_values()
             try:
                 reload_services_for_page(self)
             except Exception:
@@ -1003,6 +1072,7 @@ class NewOrderPage(tk.Frame):
             db.delete_service(int(sid))
             load_services()
             clear_form()
+            refresh_unit_combo_values()
             try:
                 reload_services_for_page(self)
             except Exception:
@@ -1013,6 +1083,7 @@ class NewOrderPage(tk.Frame):
                 db.restore_default_services()
                 load_services()
                 clear_form()
+                refresh_unit_combo_values()
                 try:
                     reload_services_for_page(self)
                 except Exception:
@@ -1044,7 +1115,7 @@ class NewOrderPage(tk.Frame):
             messagebox.showerror("Missing Service", "Please select a service before adding an item")
             return
 
-        service_type, pricing = self.service_map[service]
+        service_type, pricing, unit = self.service_map[service]
         quantity = None
         price = None
 
@@ -1096,7 +1167,7 @@ class NewOrderPage(tk.Frame):
                         price_per_item = float(pricing.get(size, 0))
                     else:
                         price_per_item = float(pricing)
-                    quantity = f"{qty}x {size.capitalize()}"
+                    quantity = f"{qty} pcs ({'L' if size == 'large' else 'S'})"
                     price = price_per_item * qty
                 else:
                     # per-item service: use qty entry (reuse qty_var if present or weight_var)
@@ -1113,7 +1184,7 @@ class NewOrderPage(tk.Frame):
                         messagebox.showerror("Invalid Input", "Quantity must be a valid number")
                         return
                     price_per_item = float(pricing)
-                    quantity = f"{qty} pcs"
+                    quantity = f"{qty} {unit}"
                     price = price_per_item * qty
             else:
                 messagebox.showerror("Configuration Error", "Unknown service type")
@@ -1135,6 +1206,7 @@ class NewOrderPage(tk.Frame):
             self.address_entry.config(state='disabled')
             self.email_entry.config(state='disabled')
             self.phone_entry.config(state='disabled')
+            self.lookup_btn.config(state='disabled')
         except Exception:
             pass
 
@@ -1150,6 +1222,7 @@ class NewOrderPage(tk.Frame):
                 self.address_entry.config(state='normal')
                 self.email_entry.config(state='normal')
                 self.phone_entry.config(state='normal')
+                self.lookup_btn.config(state='normal')
             except Exception:
                 pass
             
@@ -1165,6 +1238,7 @@ class NewOrderPage(tk.Frame):
             self.address_entry.config(state='normal')
             self.email_entry.config(state='normal')
             self.phone_entry.config(state='normal')
+            self.lookup_btn.config(state='normal')
         except Exception:
             pass
 
@@ -1228,6 +1302,7 @@ class NewOrderPage(tk.Frame):
                 self.address_entry.config(state='normal')
                 self.email_entry.config(state='normal')
                 self.phone_entry.config(state='normal')
+                self.lookup_btn.config(state='normal')
             except Exception:
                 pass
             self.first_name_entry.delete(0, tk.END)
@@ -1866,17 +1941,11 @@ class ViewOrderPage(tk.Frame):
         
         config_win = tk.Toplevel(self)
         config_win.title("Overdue Rules Config")
-        config_win.geometry("340x180")
+        center_window(config_win, 340, 180)
         config_win.configure(bg=PRIMARY)
         config_win.grab_set()  # Lock window focus
         config_win.resizable(False, False)
         
-        # Center modal window relative to display screen
-        config_win.update_idletasks()
-        w, h = config_win.winfo_width(), config_win.winfo_height()
-        x = (config_win.winfo_screenwidth() // 2) - (w // 2)
-        y = (config_win.winfo_screenheight() // 2) - (h // 2)
-        config_win.geometry(f'{w}x{h}+{x}+{y}')
         
         tk.Label(
             config_win, 
@@ -1930,7 +1999,7 @@ class ViewOrderPage(tk.Frame):
 
         payment_win = tk.Toplevel(self)
         payment_win.title("Process Payment")
-        payment_win.geometry("520x450")
+        center_window(payment_win, 520, 450)
         payment_win.configure(bg=PRIMARY)
         payment_win.resizable(False, False)
         payment_win.grab_set()
@@ -1964,7 +2033,7 @@ class ViewOrderPage(tk.Frame):
         def _choose_from_matches_payment(matches):
             pick_win = tk.Toplevel(payment_win)
             pick_win.title('Select Order')
-            pick_win.geometry('400x300')
+            center_window(pick_win, 400, 300)
             pick_win.configure(bg=PRIMARY)
             
             lb = tk.Listbox(pick_win, font=REG_TEXT, selectbackground=SECONDARY, selectforeground=PRIMARY)
@@ -2172,7 +2241,7 @@ class ViewOrderPage(tk.Frame):
 
         edit_win = tk.Toplevel(self)
         edit_win.title(f"Edit Order {target_id}" if not is_child else f"Edit Service {target_id}")
-        edit_win.geometry("500x450")
+        center_window(edit_win, 500, 450)
         edit_win.resizable(False, False)
         edit_win.grab_set()
 
@@ -2503,7 +2572,7 @@ class CustomersPage(tk.Frame):
         rec = dict(rec)
         edit_win = tk.Toplevel(self)
         edit_win.title(f"Edit Customer {cid}")
-        edit_win.geometry("460x420")
+        center_window(edit_win, 460, 420)
         edit_win.resizable(False, False)
         edit_win.grab_set()
         edit_win.configure(bg=PRIMARY)

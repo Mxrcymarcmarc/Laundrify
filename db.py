@@ -132,11 +132,12 @@ def init_db():
             cursor.execute("ALTER TABLE SERVICES ADD COLUMN Service_Unit TEXT DEFAULT 'pcs'")
         except Exception:
             pass
-        # Ensure SERVICES has Combo_Key for composite/mixed services
+        # Drop Combo_Key column if it exists in SERVICES
         try:
-            cursor.execute("ALTER TABLE SERVICES ADD COLUMN Combo_Key TEXT DEFAULT NULL")
+            cursor.execute("ALTER TABLE SERVICES DROP COLUMN Combo_Key")
         except Exception:
             pass
+
 
         # Migration block for OrderDetailID: integer to text composite string format
         cursor.execute("PRAGMA table_info(ORDER_DETAILS)")
@@ -324,6 +325,105 @@ def init_db():
     except Exception:
         pass
 
+    # Seed default services if they don't exist in SERVICES table
+    try:
+        # First, force correct default pricing for Dry Cleaning and Ironing in case they are already created with 150/150 or 20/20
+        with sqlite3.connect("Laundrify.db") as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE SERVICES SET Service_Unit_Price = 110, Large_Unit_Price = 150 WHERE Service_Type = 'Dry Cleaning' AND (Service_Unit_Price != 110 OR Large_Unit_Price != 150)")
+            cursor.execute("UPDATE SERVICES SET Service_Unit_Price = 20, Large_Unit_Price = 30 WHERE Service_Type = 'Ironing' AND (Service_Unit_Price != 20 OR Large_Unit_Price != 30)")
+            # Clean up Large_Unit_Price for all non-pcs services
+            cursor.execute("UPDATE SERVICES SET Large_Unit_Price = NULL WHERE LOWER(Service_Unit) != 'pcs' AND Large_Unit_Price IS NOT NULL")
+            conn.commit()
+            
+        defaults = [
+            ("Wash, Dry & Fold", 70, 'kg', 70),
+            ("Wash & Dry", 50, 'kg', 50),
+            ("Dry Cleaning", 110, 'pcs', 150),
+            ("Ironing", 20, 'pcs', 30),
+            ("Detergent", 15, 'pack', 15),
+            ("Bleach", 15, 'pack', 15),
+            ("Fabric Softener", 15, 'pack', 15)
+        ]
+        with sqlite3.connect("Laundrify.db") as conn:
+            cursor = conn.cursor()
+            for name, price, unit, large_price in defaults:
+                cursor.execute("SELECT 1 FROM SERVICES WHERE Service_Type = ?", (name,))
+                if not cursor.fetchone():
+                    cursor.execute("SELECT ServiceID FROM SERVICES ORDER BY ServiceID")
+                    existing = {r[0] for r in cursor.fetchall()}
+                    candidate = 1
+                    while candidate in existing:
+                        candidate += 1
+                    db_large_price = int(large_price) if unit.lower() == 'pcs' else None
+                    cursor.execute(
+                        "INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Large_Unit_Price, Service_Unit) VALUES (?, ?, ?, ?, ?)",
+                        (candidate, name, int(price), db_large_price, unit)
+                    )
+            conn.commit()
+    except Exception:
+        pass
+
+    # Legacy migration for small/large pcs items to the new unified format
+    try:
+        import re
+        with sqlite3.connect("Laundrify.db") as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT OrderDetailID, ServiceID, Order_Subtotal, Item_Weight, Item_Unit FROM ORDER_DETAILS WHERE LOWER(Item_Unit) = 'pcs'")
+            pcs_rows = cursor.fetchall()
+            for odid, sid, subtotal, weight, unit in pcs_rows:
+                s = str(weight or '').strip()
+                
+                # Check if it is already in the correct format "X pcs (L)" or "X pcs (S)"
+                m_exact = re.match(r"^(\d+)\s*pcs\s*\(([LS])\)$", s, re.IGNORECASE)
+                if m_exact:
+                    # Ensure correct capitalization
+                    correct_format = f"{m_exact.group(1)} pcs ({m_exact.group(2).upper()})"
+                    if s != correct_format:
+                        cursor.execute("UPDATE ORDER_DETAILS SET Item_Weight = ? WHERE OrderDetailID = ?", (correct_format, odid))
+                    continue
+                
+                # Parse numeric qty
+                m_qty = re.search(r"(\d+)", s)
+                qty = int(m_qty.group(1)) if m_qty else 0
+                if qty <= 0:
+                    qty = 1
+                
+                # Detect size
+                size_char = None
+                if re.search(r"\b(large|l)\b", s, re.IGNORECASE):
+                    size_char = "L"
+                elif re.search(r"\b(small|s)\b", s, re.IGNORECASE):
+                    size_char = "S"
+                
+                if not size_char:
+                    # Fetch service prices
+                    cursor.execute("SELECT Service_Type, Service_Unit_Price, Large_Unit_Price FROM SERVICES WHERE ServiceID = ?", (sid,))
+                    s_row = cursor.fetchone()
+                    if s_row:
+                        s_type, small_p, large_p = s_row
+                        if large_p is None:
+                            large_p = small_p
+                    else:
+                        small_p = 0
+                        large_p = 0
+                    
+                    if qty > 0 and subtotal is not None:
+                        unit_price = float(subtotal) / qty
+                        if abs(unit_price - large_p) < abs(unit_price - small_p) and large_p != small_p:
+                            size_char = "L"
+                        else:
+                            size_char = "S"
+                    else:
+                        size_char = "S"
+                
+                new_weight_str = f"{qty} pcs ({size_char})"
+                cursor.execute("UPDATE ORDER_DETAILS SET Item_Weight = ? WHERE OrderDetailID = ?", (new_weight_str, odid))
+            conn.commit()
+    except Exception:
+        pass
+
+
 def check_and_apply_overdue_logic(rows):
     """
     Takes database rows containing Order_Status and Order_Ready_At,
@@ -488,60 +588,61 @@ def get_order_qty_display(order_id):
         totals = {}
         for r in rows:
             raw_weight = r[0]
-            unit_hint = (r[1] or '').lower()
-            weight = 0.0
-            unit = 'pcs'
+            unit_hint = (r[1] or '').strip().lower()
+            if not unit_hint:
+                unit_hint = 'pcs'
 
-            # If explicit unit column exists and is meaningful
-            if unit_hint in ('kg', 'pcs', 'pc'):
-                unit = 'kg' if unit_hint == 'kg' else 'pcs'
-
-            # Try numeric coercion first
+            # Parse weight value
+            weight_val = 0.0
+            group_key = unit_hint
             if isinstance(raw_weight, (int, float)):
-                weight = float(raw_weight)
+                weight_val = float(raw_weight)
+                group_key = unit_hint
             else:
-                # raw_weight might be bytes or str with units: '3 kg', '3x Small', '3 pcs'
-                try:
-                    s = str(raw_weight).strip().lower()
-                except Exception:
-                    s = ''
-
-                if not s:
-                    weight = 0.0
-                else:
-                    # match '3 kg' or '3.5 kg'
-                    m = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*(kg|kilos)?$", s)
-                    if m:
-                        weight = float(m.group(1))
-                        unit = 'kg'
+                s = str(raw_weight or '').strip()
+                if unit_hint == 'pcs':
+                    # match "10 pcs (L)" or "10 pcs (S)" or "10x Large" or "10x Small"
+                    # extract digits and size
+                    m_size = re.search(r'(\d+)\s*(?:pcs|pc|x)?\s*(?:\((L|S)\)|(Large|Small|L|S))', s, re.IGNORECASE)
+                    if m_size:
+                        qty = int(m_size.group(1))
+                        # normalized size char: 'L' or 'S'
+                        size_char = (m_size.group(2) or m_size.group(3) or 'S')[0].upper()
+                        weight_val = float(qty)
+                        group_key = f"pcs ({size_char})"
                     else:
-                        # match '3x small' or '3 x small' or '3 pcs' or '3pc'
-                        m2 = re.match(r"^([0-9]+)\s*(?:x|pcs|pc)?(?:\s*.*)?$", s)
-                        if m2:
-                            weight = float(m2.group(1))
-                            unit = 'pcs'
-                        else:
-                            # extract first numeric token as fallback
-                            m3 = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
-                            if m3:
-                                if '.' in m3.group(1):
-                                    weight = float(m3.group(1))
-                                    unit = 'kg'
-                                else:
-                                    weight = float(m3.group(1))
-                                    unit = 'pcs'
-                            else:
-                                weight = 0.0
-                                unit = 'pcs'
+                        # Fallback for pcs without size
+                        m_num = re.search(r'(\d+(?:\.[0-9]+)?)', s)
+                        weight_val = float(m_num.group(1)) if m_num else 0.0
+                        group_key = 'pcs'
+                else:
+                    # Non-pcs units (like kg, pack, etc.)
+                    m_num = re.search(r'(\d+(?:\.[0-9]+)?)', s)
+                    weight_val = float(m_num.group(1)) if m_num else 0.0
+                    group_key = unit_hint
 
-            totals[unit] = totals.get(unit, 0.0) + weight
+            if weight_val > 0:
+                totals[group_key] = totals.get(group_key, 0.0) + weight_val
 
         parts = []
-        for unit, val in totals.items():
-            if unit == 'kg':
-                parts.append(f"{val:g} kg")
-            else:
-                parts.append(f"{int(val)} pcs")
+        keys_order = ['pcs (L)', 'pcs (S)', 'pcs', 'kg']
+        for k in keys_order:
+            if k in totals and totals[k] > 0:
+                val = totals[k]
+                if 'pcs' in k:
+                    parts.append(f"{int(val)} {k}")
+                elif k == 'kg':
+                    parts.append(f"{val:g} kg")
+                else:
+                    parts.append(f"{val:g} {k}")
+        
+        # Add any remaining keys not in keys_order
+        for k, val in totals.items():
+            if k not in keys_order and val > 0:
+                parts.append(f"{val:g} {k}")
+                
+        if not parts:
+            return "-"
         return ' + '.join(parts)
 
 def get_services():
@@ -569,7 +670,9 @@ def get_next_service_id():
 def add_service(service_type, unit_price, unit='pcs', large_price=None):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        l_price = int(large_price) if large_price is not None else int(unit_price)
+        l_price = None
+        if unit.lower() == 'pcs':
+            l_price = int(large_price) if large_price is not None else int(unit_price)
         new_id = get_next_service_id()
         cursor.execute("INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Service_Unit, Large_Unit_Price) VALUES (?, ?, ?, ?, ?)", (new_id, service_type, int(unit_price), unit, l_price))
         conn.commit()
@@ -578,7 +681,9 @@ def add_service(service_type, unit_price, unit='pcs', large_price=None):
 def update_service(service_id, service_type, unit_price, unit='pcs', large_price=None):
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        l_price = int(large_price) if large_price is not None else int(unit_price)
+        l_price = None
+        if unit.lower() == 'pcs':
+            l_price = int(large_price) if large_price is not None else int(unit_price)
         cursor.execute("UPDATE SERVICES SET Service_Type = ?, Service_Unit_Price = ?, Service_Unit = ?, Large_Unit_Price = ? WHERE ServiceID = ?", (service_type, int(unit_price), unit, l_price, service_id))
         conn.commit()
         return True
@@ -617,55 +722,31 @@ def restore_default_services():
     exists it will be updated (preserving ServiceID); otherwise the service will be inserted.
     """
     defaults = [
-        ("Wash, Dry & Fold", 70, 'kg'),
-        ("Wash & Dry", 50, 'kg'),
-        ("Dry Cleaning", 150, 'pcs'),
-        ("Ironing", 20, 'pcs')
+        ("Wash, Dry & Fold", 70, 'kg', 70),
+        ("Wash & Dry", 50, 'kg', 50),
+        ("Dry Cleaning", 110, 'pcs', 150),
+        ("Ironing", 20, 'pcs', 30),
+        ("Detergent", 15, 'pack', 15),
+        ("Bleach", 15, 'pack', 15),
+        ("Fabric Softener", 15, 'pack', 15)
     ]
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        for name, price, unit in defaults:
+        for name, price, unit, large_price in defaults:
+            db_large_price = int(large_price) if unit.lower() == 'pcs' else None
             cursor.execute("SELECT ServiceID FROM SERVICES WHERE Service_Type = ?", (name,))
             row = cursor.fetchone()
             if row and row[0]:
-                cursor.execute("UPDATE SERVICES SET Service_Unit_Price = ?, Service_Unit = ?, Large_Unit_Price = ? WHERE ServiceID = ?", (int(price), unit, int(price), row[0]))
+                cursor.execute("UPDATE SERVICES SET Service_Unit_Price = ?, Service_Unit = ?, Large_Unit_Price = ? WHERE ServiceID = ?", (int(price), unit, db_large_price, row[0]))
             else:
-                new_sid = get_next_service_id()
-                cursor.execute("INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Large_Unit_Price, Service_Unit) VALUES (?, ?, ?, ?, ?)", (new_sid, name, int(price), int(price), unit))
+                cursor.execute("SELECT ServiceID FROM SERVICES ORDER BY ServiceID")
+                existing = {r[0] for r in cursor.fetchall()}
+                candidate = 1
+                while candidate in existing:
+                    candidate += 1
+                cursor.execute("INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Large_Unit_Price, Service_Unit) VALUES (?, ?, ?, ?, ?)", (candidate, name, int(price), db_large_price, unit))
         conn.commit()
     return True
-
-
-def get_or_create_combined_service(component_service_ids):
-    """Return a deterministic combined ServiceID for the given component service IDs.
-
-    The combination key is formed by sorting numeric ServiceIDs and joining them with '-'.
-    If a SERVICES row with that Combo_Key exists its ServiceID is returned. Otherwise a new
-    SERVICES row is inserted with Service_Type set to the joined service names and Combo_Key set.
-    """
-    ids = sorted({int(i) for i in component_service_ids if i is not None})
-    if not ids:
-        return None
-    if len(ids) == 1:
-        return ids[0]
-    combo_key = 'combo:' + '-'.join(str(i) for i in ids)
-    with sqlite3.connect("Laundrify.db") as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT ServiceID FROM SERVICES WHERE Combo_Key = ?", (combo_key,))
-        row = cur.fetchone()
-        if row and row[0]:
-            return row[0]
-        # build a human-friendly name using the component service types (in the sorted id order)
-        placeholders = ','.join(['?'] * len(ids))
-        cur.execute(f"SELECT ServiceID, Service_Type FROM SERVICES WHERE ServiceID IN ({placeholders})", tuple(ids))
-        rows = cur.fetchall()
-        id_to_name = {r[0]: r[1] for r in rows}
-        names = [id_to_name.get(i, f"SVC#{i}") for i in ids]
-        combo_name = ' + '.join(names)
-        new_combo_id = get_next_service_id()
-        cur.execute("INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Service_Unit, Combo_Key) VALUES (?, ?, ?, ?, ?)", (new_combo_id, combo_name, 0, 'mixed', combo_key))
-        conn.commit()
-        return new_combo_id
 
 
 
@@ -826,7 +907,6 @@ def create_order(customer_id, total_price, items, notes=""):
     Returns: order_id
     """
     from datetime import datetime
-    import re
     
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
@@ -845,51 +925,36 @@ def create_order(customer_id, total_price, items, notes=""):
         for idx, item in enumerate(items, start=1):
             order_detail_id = f"{order_id}-{idx}"
             
-            cursor.execute("SELECT ServiceID FROM SERVICES WHERE Service_Type = ?", (item['service'],))
+            cursor.execute("SELECT ServiceID, Service_Unit FROM SERVICES WHERE Service_Type = ?", (item['service'],))
             service_result = cursor.fetchone()
             
             if service_result:
-                service_id = service_result[0]
+                service_id, service_unit = service_result
+                if not service_unit:
+                    service_unit = 'pcs'
             else:
+                service_unit = 'pcs'
                 new_svc_id = get_next_service_id()
                 cursor.execute(
-                    "INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price) VALUES (?, ?, ?)",
-                    (new_svc_id, item['service'], 0)
+                    "INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Service_Unit) VALUES (?, ?, ?, ?)",
+                    (new_svc_id, item['service'], 0, 'pcs')
                 )
                 service_id = new_svc_id
             
-            # parse quantity string to numeric value and unit
             qty_raw = item.get('quantity', '')
-            qty_value = 0
-            unit = 'pcs'
-            if isinstance(qty_raw, (int, float)):
-                qty_value = qty_raw
-            elif isinstance(qty_raw, str):
-                s = qty_raw.strip().lower()
-                # match patterns like '3 kg' or '3.5 kg'
-                m = re.match(r"([0-9]+(?:\.[0-9]+)?)\s*kg", s)
-                if m:
-                    qty_value = float(m.group(1))
-                    unit = 'kg'
+            unit = service_unit.lower()
+            
+            if isinstance(qty_raw, str):
+                s_clean = qty_raw.strip().lower()
+                if any(c.isalpha() for c in s_clean):
+                    qty_value = qty_raw
                 else:
-                    # match patterns like '3x' or '3 x' or '3 pcs'
-                    m2 = re.match(r"([0-9]+)\s*(?:x|pcs|pc)?", s)
-                    if m2:
-                        qty_value = int(m2.group(1))
-                        unit = 'pcs'
-                    else:
-                        # fallback: try to extract number
-                        m3 = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
-                        if m3:
-                            if '.' in m3.group(1):
-                                qty_value = float(m3.group(1))
-                                unit = 'kg'
-                            else:
-                                qty_value = int(m3.group(1))
-                                unit = 'pcs'
-                        else:
-                            qty_value = 0
-                            unit = 'pcs'
+                    try:
+                        qty_value = float(s_clean)
+                    except ValueError:
+                        qty_value = qty_raw
+            else:
+                qty_value = qty_raw
 
             # Persist the service row and attach any per-item notes to the service line
             per_item_notes = item.get('notes', '') if isinstance(item, dict) else ''
@@ -1326,25 +1391,62 @@ def get_order_service_rows(order_id):
         item_unit = (row['Item_Unit'] or 'pcs').lower()
         subtotal = row['Order_Subtotal'] or 0
 
-        if isinstance(raw_weight, (int, float)):
-            qty_val = float(raw_weight)
-            if item_unit == 'kg':
-                qty_display = f"{qty_val:g} kg"
+        if item_unit == 'kg':
+            if isinstance(raw_weight, (int, float)):
+                qty_display = f"{float(raw_weight):g} kg"
             else:
-                qty_display = f"{int(qty_val)} pcs"
-        else:
+                s = str(raw_weight or '').strip()
+                m = re.search(r'([0-9]+(?:\.[0-9]+)?)', s)
+                if m:
+                    qty_display = f"{float(m.group(1)):g} kg"
+                else:
+                    qty_display = s or '—'
+        elif item_unit == 'pcs':
             s = str(raw_weight or '').strip()
-            # If it already looks like a formatted string (e.g. '3x Small', '2 kg') keep it
+            # Detect size
+            size_char = None
+            if re.search(r'\b(large|l)\b', s, re.IGNORECASE):
+                size_char = 'L'
+            elif re.search(r'\b(small|s)\b', s, re.IGNORECASE):
+                size_char = 'S'
+            
+            # Extract quantity
+            m_qty = re.search(r'(\d+)', s)
+            qty = int(m_qty.group(1)) if m_qty else 0
+            
+            if not size_char:
+                # Infer size using pricing
+                try:
+                    with sqlite3.connect("Laundrify.db") as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT Service_Unit_Price, Large_Unit_Price FROM SERVICES WHERE ServiceID = ?", (row['ServiceID'],))
+                        prices = cursor.fetchone()
+                        if prices:
+                            small_p = float(prices[0] or 0)
+                            large_p = float(prices[1] or small_p)
+                            if large_p != small_p and qty > 0:
+                                unit_p = float(subtotal) / qty
+                                if abs(unit_p - large_p) < abs(unit_p - small_p):
+                                    size_char = 'L'
+                                else:
+                                    size_char = 'S'
+                            else:
+                                size_char = 'S'
+                        else:
+                            size_char = 'S'
+                except Exception:
+                    size_char = 'S'
+            qty_display = f"{qty} pcs ({size_char})"
+        else:
+            # Custom units
+            s = str(raw_weight or '').strip()
+            # If it already looks like a formatted string (e.g. '3 pack') keep it
             if re.search(r'[a-zA-Z]', s):
                 qty_display = s or '—'
             else:
                 m = re.search(r'([0-9]+(?:\.[0-9]+)?)', s)
                 if m:
-                    qty_val = float(m.group(1))
-                    if item_unit == 'kg':
-                        qty_display = f"{qty_val:g} kg"
-                    else:
-                        qty_display = f"{int(qty_val)} pcs"
+                    qty_display = f"{int(float(m.group(1)))} {item_unit}"
                 else:
                     qty_display = s or '—'
 
@@ -1546,43 +1648,86 @@ def delete_service_row(order_detail_id):
 
 def update_service_details(order_detail_id, weight, subtotal, status, paid_val, notes=""):
     from datetime import datetime
-    import re
     
     if status == "Released" and not paid_val:
         raise ValueError("Cannot mark service as Released. This service must be paid first.")
 
-    # Parse numeric weight value and unit from input string robustly
-    qty_value = 0.0
-    unit = 'pcs'
-    if isinstance(weight, (int, float)):
-        qty_value = float(weight)
-    elif isinstance(weight, str):
-        s = weight.strip().lower()
-        m = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*kg", s)
-        if m:
-            qty_value = float(m.group(1))
-            unit = 'kg'
-        else:
-            m2 = re.match(r"^([0-9]+)\s*(?:x|pcs|pc)?", s)
-            if m2:
-                qty_value = float(m2.group(1))
-                unit = 'pcs'
-            else:
-                m3 = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
-                if m3:
-                    qty_value = float(m3.group(1))
-                    unit = 'kg' if '.' in m3.group(1) else 'pcs'
-                else:
-                    qty_value = 0.0
-                    unit = 'pcs'
-
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT OrderID FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
+        cursor.execute("SELECT OrderID, ServiceID FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
         order_row = cursor.fetchone()
         if not order_row:
             return
-        order_id = order_row[0]
+        order_id, service_id = order_row
+        
+        cursor.execute("SELECT Service_Unit FROM SERVICES WHERE ServiceID = ?", (service_id,))
+        service_unit_row = cursor.fetchone()
+        service_unit = service_unit_row[0] if service_unit_row and service_unit_row[0] else 'pcs'
+
+    unit = service_unit.lower()
+    if unit == 'pcs':
+        import re
+        s_weight = str(weight).strip()
+        # Find first numeric sequence
+        m_num = re.search(r'(\d+(?:\.\d+)?)', s_weight)
+        qty = float(m_num.group(1)) if m_num else 1.0
+        
+        # Determine size:
+        size_char = None
+        if re.search(r'\b(large|l)\b', s_weight, re.IGNORECASE):
+            size_char = 'L'
+        elif re.search(r'\b(small|s)\b', s_weight, re.IGNORECASE):
+            size_char = 'S'
+            
+        if not size_char:
+            # Check the old Item_Weight
+            with sqlite3.connect("Laundrify.db") as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT Item_Weight FROM ORDER_DETAILS WHERE OrderDetailID = ?", (order_detail_id,))
+                old_row = cursor.fetchone()
+                if old_row and old_row[0]:
+                    old_weight = str(old_row[0]).strip()
+                    if re.search(r'\b(large|l)\b', old_weight, re.IGNORECASE):
+                        size_char = 'L'
+                    elif re.search(r'\b(small|s)\b', old_weight, re.IGNORECASE):
+                        size_char = 'S'
+                        
+        if not size_char:
+            # Fallback to pricing heuristic
+            with sqlite3.connect("Laundrify.db") as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT Service_Unit_Price, Large_Unit_Price FROM SERVICES WHERE ServiceID = ?", (service_id,))
+                s_prices = cursor.fetchone()
+                if s_prices:
+                    small_p = float(s_prices[0] or 0)
+                    large_p = float(s_prices[1] or small_p)
+                    if large_p != small_p and qty > 0:
+                        unit_p = subtotal / qty
+                        if abs(unit_p - large_p) < abs(unit_p - small_p):
+                            size_char = 'L'
+                        else:
+                            size_char = 'S'
+                    else:
+                        size_char = 'S'
+                else:
+                    size_char = 'S'
+        qty_value = f"{int(qty)} pcs ({size_char})"
+    else:
+        qty_value = 0.0
+        if isinstance(weight, (int, float)):
+            qty_value = float(weight)
+        elif isinstance(weight, str):
+            s = weight.strip().lower()
+            if any(c.isalpha() for c in s):
+                qty_value = weight
+            else:
+                try:
+                    qty_value = float(s)
+                except ValueError:
+                    qty_value = weight
+
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
         
         # Determine paid timestamp
         if paid_val:
