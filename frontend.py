@@ -1458,7 +1458,7 @@ class ViewOrderPage(tk.Frame):
 
         sort_frame = tk.Frame(legend_frame, bg=PRIMARY)
         sort_frame.grid(row=0, column=2, sticky='e')
-        self.order_sort_label = tk.Label(sort_frame, text='Sorting by received date:', font=TTL_TEXT, bg=PRIMARY)
+        self.order_sort_label = tk.Label(sort_frame, text='Sorting by received date: newest first', font=TTL_TEXT, bg=PRIMARY)
         self.order_sort_label.grid(row=0, column=0, sticky='e', padx=13)
         self.order_sort_newest_btn = tk.Button(sort_frame, text='Newest first', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1, command=lambda: self.set_order_sort(True), width=12)
         self.order_sort_newest_btn.grid(row=0, column=1, padx=(0, 4))
@@ -1536,11 +1536,11 @@ class ViewOrderPage(tk.Frame):
         if self.order_sort_desc:
             self.order_sort_newest_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
             self.order_sort_oldest_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
-            self.order_sort_label.config(text='Sorting by received date:')
+            self.order_sort_label.config(text='Sorting by received date: newest first')
         else:
             self.order_sort_newest_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
             self.order_sort_oldest_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
-            self.order_sort_label.config(text='Sorting by received date:')
+            self.order_sort_label.config(text='Sorting by received date: oldest first')
         if refresh:
             self.refresh_all()
 
@@ -2349,7 +2349,7 @@ class CustomersPage(tk.Frame):
 
         right_sort_frame = tk.Frame(sort_frame, bg=PRIMARY)
         right_sort_frame.grid(row=0, column=1, sticky='e')
-        self.customer_sort_label = tk.Label(right_sort_frame, text='Current:', font=TTL_TEXT, bg=PRIMARY)
+        self.customer_sort_label = tk.Label(right_sort_frame, text='Current: ID ascending', font=TTL_TEXT, bg=PRIMARY)
         self.customer_sort_label.grid(row=0, column=0, padx=(12,13), sticky='e')
         self.customer_sort_asc_btn = tk.Button(right_sort_frame, width=12, text='Ascending', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1, command=lambda: self.set_customer_sort(self.customer_sort_key, ascending=True))
         self.customer_sort_asc_btn.grid(row=0, column=1, padx=(0, 4))
@@ -2451,7 +2451,7 @@ class CustomersPage(tk.Frame):
             self.customer_sort_desc_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
             direction = 'ascending'
         field_name = {'id': 'ID', 'first': 'First Name', 'last': 'Last Name'}.get(self.customer_sort_key, self.customer_sort_key)
-        self.customer_sort_label.config(text='Current:')
+        self.customer_sort_label.config(text=f'Current: {field_name} {direction}')
 
     def _confirm_delete(self, iid):
         import db
@@ -2681,9 +2681,7 @@ class ReportsPage(tk.Frame):
                     elif i == 2:
                         rank_str, tag = "3rd", "top3"
                     else:
-                        n = i + 1
-                        suffix = 'th' if 11 <= (n % 100) <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
-                        rank_str, tag = f"{n}{suffix}", ("evenrow" if i % 2 == 0 else "oddrow")
+                        rank_str, tag = f"#{i+1}", ("evenrow" if i % 2 == 0 else "oddrow")
                         
                     tree.insert("", "end", values=(rank_str, row[0], row[1], f"₱ {row[2]:,.2f}"), tags=(tag,))
                 return tree
@@ -2808,7 +2806,7 @@ class ReportsPage(tk.Frame):
             
             if revenue and max(revenue) > 0:
                 peak_idx = revenue.index(max(revenue))
-                ax.annotate(f"Peak: ₱{max(revenue):,.2f}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=1.0, ec='none'))
+                ax.annotate(f"Peak: ₱{max(revenue):,.2f}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=0.8, ec='none'))
                 
         elif report_type == "received":
             from matplotlib.ticker import MaxNLocator
@@ -3019,37 +3017,6 @@ class ReportsPage(tk.Frame):
         
         self.canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
         self.canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
-
-        if report_type == "revenue" and revenue:
-            hover_annot = ax.annotate(
-                "", xy=(0, 0), xytext=(0, 14), textcoords='offset points',
-                ha='center', fontweight='bold', color='#2c3e50',
-                bbox=dict(boxstyle='round,pad=0.3', fc='#dfe6e9', alpha=1.0, ec='none'),
-                visible=False
-            )
-            x_coords = list(range(len(days)))
-
-            def on_hover(event):
-                if event.inaxes != ax:
-                    hover_annot.set_visible(False)
-                    self.canvas.draw_idle()
-                    return
-                found = False
-                for i, (xc, yc) in enumerate(zip(x_coords, revenue)):
-                    # transform data coords to display coords for distance check
-                    disp = ax.transData.transform((xc, yc))
-                    dist = ((event.x - disp[0])**2 + (event.y - disp[1])**2) ** 0.5
-                    if dist < 18:
-                        hover_annot.xy = (xc, yc)
-                        hover_annot.set_text(f"{days[i]}\n₱{yc:,.2f}")
-                        hover_annot.set_visible(True)
-                        found = True
-                        break
-                if not found:
-                    hover_annot.set_visible(False)
-                self.canvas.draw_idle()
-
-            self.canvas.mpl_connect('motion_notify_event', on_hover)
 
 
 
