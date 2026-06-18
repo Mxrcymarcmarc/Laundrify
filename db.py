@@ -712,7 +712,7 @@ def process_payment(order_id, amount_paid):
 
         cursor.execute(
             "INSERT INTO PAYMENTS (OrderID, Amount_Paid, Payment_Date) VALUES (?, ?, ?)",
-            (order_id, amount_paid, timestamp)
+            (order_id, due_amount, timestamp)
         )
 
         cursor.execute(
@@ -1412,7 +1412,7 @@ def process_service_payment(order_detail_id, amount_paid):
         # Record payment in PAYMENTS table
         cursor.execute(
             "INSERT INTO PAYMENTS (OrderID, Amount_Paid, Payment_Date) VALUES (?, ?, ?)",
-            (order_id, amount_paid, timestamp)
+            (order_id, subtotal, timestamp)
         )
         
         # Check if all services for this order are paid now:

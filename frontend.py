@@ -850,7 +850,7 @@ class NewOrderPage(tk.Frame):
         from tkinter import messagebox
         svc_win = tk.Toplevel(self)
         svc_win.title('Manage Services')
-        svc_win.geometry('520x520')
+        svc_win.geometry('520x460')
         svc_win.resizable(False, False)
         svc_win.configure(bg=PRIMARY)
         svc_win.grab_set()
@@ -2064,9 +2064,38 @@ class ViewOrderPage(tk.Frame):
         cash_entry.grid(row=2, column=1, sticky="ew", pady=12, padx=10)
         tk.Label(form_frame, text="Cash Received (₱):", font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=2, column=0, sticky="w", pady=12)
 
-        # Bind search triggers safely to inputs as originally intended
-        order_entry.bind("<FocusOut>", lambda e: _find_order_payment())
-        order_entry.bind("<Return>", lambda e: _find_order_payment())
+        change_var = tk.StringVar(value="₱0.00")
+        change_display = tk.Label(form_frame, textvariable=change_var, font=("Arial", 16, "bold"), bg=PRIMARY, fg="#27ae60") 
+        change_display.grid(row=3, column=1, sticky="w", pady=12, padx=10)
+        tk.Label(form_frame, text="Change (₱):", font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY).grid(row=3, column=0, sticky="w", pady=12)
+
+        def calculate_change(event=None):
+            try:
+                # Strip out the peso sign and commas to get the raw float
+                due_str = amount_due_display.cget("text").replace("₱", "").replace(",", "").strip()
+                due = float(due_str) if due_str else 0.0
+                
+                cash_str = cash_entry.get().strip()
+                cash = float(cash_str) if cash_str else 0.0
+                
+                # If they empty the box, reset
+                if cash_str == "":
+                    change_var.set("₱0.00")
+                    change_display.config(fg="#27ae60")
+                    return
+
+                change = cash - due
+                if change >= 0:
+                    change_var.set(f"₱{change:,.2f}")
+                    change_display.config(fg="#27ae60") # Green for good to go
+                else:
+                    change_var.set("Insufficient")
+                    change_display.config(fg="#e74c3c") # Red for not enough cash
+            except ValueError:
+                change_var.set("₱0.00")
+
+        # Bind the calculation to happen every time a key is released in the cash entry box
+        cash_entry.bind("<KeyRelease>", calculate_change)
 
         def process_payment():
             order_id = order_entry_var.get().strip()
