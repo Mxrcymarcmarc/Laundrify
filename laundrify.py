@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 import os
 import db
+import ctypes
 
 PRIMARY = "#F0EDE5"
 SECONDARY = "#4A6FA5"
@@ -53,6 +54,13 @@ def show_splash(root):
 
 
 def main():
+    # Tell Windows to use our app's icon for the taskbar instead of Python's
+    try:
+        myappid = 'laundrify.app.version1'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except Exception:
+        pass
+
     # Initialize database
     db.init_db()
     
@@ -63,12 +71,7 @@ def main():
         root.iconphoto(False, root.logo_icon)
     except Exception:
         pass
-    width, height = 1500, 750
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    x = (screen_width - width) // 2
-    y = (screen_height - height) // 2
-    root.geometry(f'{width}x{height}+{x}+{y}')
+    root.geometry('1500x750')
     root.resizable(False, False)
     root.configure(bg=PRIMARY)
     
