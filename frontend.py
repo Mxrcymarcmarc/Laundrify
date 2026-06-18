@@ -2696,7 +2696,12 @@ class ReportsPage(tk.Frame):
                     elif i == 2:
                         rank_str, tag = "3rd", "top3"
                     else:
-                        rank_str, tag = f"#{i+1}", ("evenrow" if i % 2 == 0 else "oddrow")
+                        r = i + 1
+                        if 11 <= (r % 100) <= 13:
+                            suf = 'th'
+                        else:
+                            suf = {1: 'st', 2: 'nd', 3: 'rd'}.get(r % 10, 'th')
+                        rank_str, tag = f"{r}{suf}", ("evenrow" if i % 2 == 0 else "oddrow")
                         
                     tree.insert("", "end", values=(rank_str, row[0], row[1], f"₱ {row[2]:,.2f}"), tags=(tag,))
                 return tree
@@ -2765,7 +2770,7 @@ class ReportsPage(tk.Frame):
             kpi_card = tk.Frame(kpi_frame, bg="#fff5f5", bd=1, relief="solid", highlightbackground="#e74c3c", highlightthickness=1)
             kpi_card.pack(fill="x", pady=5, padx=20)
             
-            tk.Label(kpi_card, text="URGENT ACTION CENTER", font=("Arial", 10, "bold"), bg="#fff5f5", fg="#e74c3c").pack(pady=(12, 2))
+            tk.Label(kpi_card, text="Urgent Action Center", font=("Arial", 10, "bold"), bg="#fff5f5", fg="#e74c3c").pack(pady=(12, 2))
             tk.Label(kpi_card, text=f"{total_overdue} Orders Overdue", font=("Arial", 16, "bold"), bg="#fff5f5", fg="#c0392b").pack(pady=(0, 12))
         
         elif report_type == "revenue":
@@ -2821,7 +2826,7 @@ class ReportsPage(tk.Frame):
             
             if revenue and max(revenue) > 0:
                 peak_idx = revenue.index(max(revenue))
-                ax.annotate(f"Peak: ₱{max(revenue):,.2f}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=0.8, ec='none'))
+                ax.annotate(f"Peak: ₱{max(revenue):,.2f}", xy=(peak_idx, max(revenue)), xytext=(0, 10), textcoords='offset points', ha='center', fontweight='bold', color='#2c3e50', bbox=dict(boxstyle='round,pad=0.3', fc='#f1c40f', alpha=1.0, ec='none'))
                 
         elif report_type == "received":
             from matplotlib.ticker import MaxNLocator
@@ -3032,6 +3037,37 @@ class ReportsPage(tk.Frame):
         
         self.canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
         self.canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+
+        if report_type == "revenue" and revenue:
+            hover_annot = ax.annotate(
+                "", xy=(0, 0), xytext=(0, 10), textcoords='offset points',
+                ha='center', fontweight='bold', color='#2c3e50',
+                bbox=dict(boxstyle='round,pad=0.3', fc='#c2e0f4', alpha=1.0, ec='none'),
+                visible=False, zorder=5
+            )
+            x_coords = list(range(len(days)))
+
+            def on_hover(event):
+                if event.inaxes != ax:
+                    hover_annot.set_visible(False)
+                    self.canvas.draw_idle()
+                    return
+                found = False
+                for i, (xc, yc) in enumerate(zip(x_coords, revenue)):
+                    # transform data coords to display coords for distance check
+                    disp = ax.transData.transform((xc, yc))
+                    dist = ((event.x - disp[0])**2 + (event.y - disp[1])**2) ** 0.5
+                    if dist < 18:
+                        hover_annot.xy = (xc, yc)
+                        hover_annot.set_text(f"{days[i]}\n₱{yc:,.2f}")
+                        hover_annot.set_visible(True)
+                        found = True
+                        break
+                if not found:
+                    hover_annot.set_visible(False)
+                self.canvas.draw_idle()
+
+            self.canvas.mpl_connect('motion_notify_event', on_hover)
 
 
 
