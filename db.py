@@ -1083,18 +1083,16 @@ def get_received_report_data():
     target_hours = ["06", "09", "12", "15", "18", "21"]
     results_dict = {hr: 0 for hr in target_hours}
     
-    query = """
-        SELECT 
-            strftime('%H', Order_Received_At) as order_hour,
-            COUNT(OrderID) as order_count
-        FROM ORDERS
-        WHERE date(Order_Received_At) = date('now')
-        GROUP BY order_hour
-    """
-    
+    today_str = datetime.now().strftime("%Y-%m-%d")
+         
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute(query)
+        cursor.execute("""
+            SELECT strftime('%H', Order_Received_At), COUNT(*) 
+            FROM ORDERS 
+            WHERE Order_Received_At LIKE ?
+            GROUP BY strftime('%H', Order_Received_At)
+        """, (f"{today_str}%",))
         raw_data = cursor.fetchall()
         
     for raw_hour, count in raw_data:
@@ -1191,27 +1189,26 @@ def get_overdue_report_data():
     return overdue_count, normal_ready_count
 
 def get_top_services_report_data():
-    # Counts occurrences of each service across all order details
-    query = """
-        SELECT 
-            S.Service_Type,
-            COUNT(OD.OrderDetailID) as order_count
-        FROM ORDER_DETAILS OD
-        JOIN SERVICES S ON OD.ServiceID = S.ServiceID
-        GROUP BY S.Service_Type
-        ORDER BY order_count ASC  -- ASC because ax.barh plots from bottom up
-    """
-    
+    import sqlite3
     with sqlite3.connect("Laundrify.db") as conn:
         cursor = conn.cursor()
-        cursor.execute(query)
-        raw_data = cursor.fetchall()
         
-    # Unpack into clean arrays for Matplotlib
-    services = [row[0] for row in raw_data]
-    counts = [row[1] for row in raw_data]
-    
-    return services, counts
+        # Query the Service_Name and count how many times it shows up in order details
+        cursor.execute("""
+            SELECT Service_Name, COUNT(*) as order_count
+            FROM ORDER_DETAILS
+            WHERE Service_Name IS NOT NULL AND Service_Name != ''
+            GROUP BY Service_Name
+            ORDER BY order_count ASC
+        """)
+        
+        rows = cursor.fetchall()
+        
+        # Break them back out into the two synchronized arrays your frontend needs
+        services_list = [str(r[0]) for r in rows]
+        counts_list = [int(r[1]) for r in rows]
+        
+        return services_list, counts_list
 
 def get_top_customers_by_orders():
     query = """
