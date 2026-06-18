@@ -5,7 +5,7 @@ a = Analysis(
     ['laundrify.py'],
     pathex=[],
     binaries=[],
-    datas=[('Laundrify.db', '.')],
+    datas=[('Laundrify logo rounded.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,4 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['Laundrify logo rounded.png'],
 )
