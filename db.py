@@ -611,7 +611,7 @@ def restore_default_services():
     return True
 
 
-def get_or_create_combined_service(component_service_ids):
+def get_or_create_combined_service(component_service_ids, cursor=None):
     """Return a deterministic combined ServiceID for the given component service IDs.
 
     The combination key is formed by sorting numeric ServiceIDs and joining them with '-'.
@@ -624,23 +624,37 @@ def get_or_create_combined_service(component_service_ids):
     if len(ids) == 1:
         return ids[0]
     combo_key = 'combo:' + '-'.join(str(i) for i in ids)
-    with sqlite3.connect("Laundrify.db") as conn:
-        cur = conn.cursor()
+    
+    def _find_or_create_combo(cur):
         cur.execute("SELECT ServiceID FROM SERVICES WHERE Combo_Key = ?", (combo_key,))
         row = cur.fetchone()
         if row and row[0]:
             return row[0]
-        # build a human-friendly name using the component service types (in the sorted id order)
         placeholders = ','.join(['?'] * len(ids))
         cur.execute(f"SELECT ServiceID, Service_Type FROM SERVICES WHERE ServiceID IN ({placeholders})", tuple(ids))
         rows = cur.fetchall()
         id_to_name = {r[0]: r[1] for r in rows}
         names = [id_to_name.get(i, f"SVC#{i}") for i in ids]
         combo_name = ' + '.join(names)
-        new_combo_id = get_next_service_id()
+        
+        cur.execute("SELECT ServiceID FROM SERVICES ORDER BY ServiceID")
+        existing = {r[0] for r in cur.fetchall()}
+        candidate = 1
+        while candidate in existing:
+            candidate += 1
+        new_combo_id = candidate
+        
         cur.execute("INSERT INTO SERVICES (ServiceID, Service_Type, Service_Unit_Price, Service_Unit, Combo_Key) VALUES (?, ?, ?, ?, ?)", (new_combo_id, combo_name, 0, 'mixed', combo_key))
-        conn.commit()
         return new_combo_id
+
+    if cursor is not None:
+        return _find_or_create_combo(cursor)
+    else:
+        with sqlite3.connect("Laundrify.db") as conn:
+            cur = conn.cursor()
+            res = _find_or_create_combo(cur)
+            conn.commit()
+            return res
 
 
 
@@ -817,6 +831,7 @@ def create_order(customer_id, total_price, items, notes=""):
         )
         order_id = new_order_id
         
+        service_ids = []
         for item in items:
             cursor.execute("SELECT ServiceID FROM SERVICES WHERE Service_Type = ?", (item['service'],))
             service_result = cursor.fetchone()
@@ -879,6 +894,12 @@ def create_order(customer_id, total_price, items, notes=""):
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (order_id, service_id, item['subtotal'], qty_value, unit, item.get('service',''))
                 )
+            service_ids.append(service_id)
+            
+        if service_ids:
+            combo_id = get_or_create_combined_service(service_ids, cursor=cursor)
+            if combo_id is not None:
+                cursor.execute("UPDATE ORDERS SET Composite_ServiceID = ? WHERE OrderID = ?", (combo_id, order_id))
         
         conn.commit()
         return order_id

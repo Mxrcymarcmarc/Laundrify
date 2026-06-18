@@ -20,8 +20,18 @@ def show_splash(root):
     content = tk.Frame(splash, bg=PRIMARY, bd=2, relief='ridge')
     content.pack(expand=True, fill='both', padx=10, pady=10)
 
-    title_label = tk.Label(content, text="Laundrify", font=("Cooper Black", 32), bg=PRIMARY, fg=SECONDARY)
-    title_label.pack(pady=(24, 8))
+    header_frame = tk.Frame(content, bg=PRIMARY)
+    header_frame.pack(pady=(20, 10))
+
+    try:
+        splash.logo_scaled = tk.PhotoImage(file="Laundrify logo rounded.png")
+        logo_label = tk.Label(header_frame, image=splash.logo_scaled, bg=PRIMARY)
+        logo_label.pack(side='left', padx=(0, 10))
+    except Exception:
+        pass
+
+    title_label = tk.Label(header_frame, text="Laundrify", font=("Cooper Black", 36), bg=PRIMARY, fg=SECONDARY)
+    title_label.pack(side='left')
 
     subtitle_label = tk.Label(content, text="Preparing your experience...", font=("Arial", 14), bg=PRIMARY, fg=SECONDARY)
     subtitle_label.pack(pady=(0, 18))
@@ -30,7 +40,7 @@ def show_splash(root):
     progress.pack(pady=(0, 18))
     progress.start(12)
 
-    width, height = 460, 220
+    width, height = 460, 240
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x = (screen_width - width) // 2
@@ -48,6 +58,11 @@ def main():
     
     root = tk.Tk()
     root.title('Laundrify')
+    try:
+        root.logo_icon = tk.PhotoImage(file="Laundrify logo rounded.png")
+        root.iconphoto(False, root.logo_icon)
+    except Exception:
+        pass
     root.geometry('1500x750')
     root.resizable(False, False)
     root.configure(bg=PRIMARY)
