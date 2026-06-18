@@ -1458,7 +1458,7 @@ class ViewOrderPage(tk.Frame):
 
         sort_frame = tk.Frame(legend_frame, bg=PRIMARY)
         sort_frame.grid(row=0, column=2, sticky='e')
-        self.order_sort_label = tk.Label(sort_frame, text='Sorting by received date: newest first', font=TTL_TEXT, bg=PRIMARY)
+        self.order_sort_label = tk.Label(sort_frame, text='Sorting by received date:', font=TTL_TEXT, bg=PRIMARY)
         self.order_sort_label.grid(row=0, column=0, sticky='e', padx=13)
         self.order_sort_newest_btn = tk.Button(sort_frame, text='Newest first', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1, command=lambda: self.set_order_sort(True), width=12)
         self.order_sort_newest_btn.grid(row=0, column=1, padx=(0, 4))
@@ -1528,19 +1528,16 @@ class ViewOrderPage(tk.Frame):
 
     def set_order_sort(self, newest_first, refresh=True):
         self.order_sort_desc = bool(newest_first)
-        active_bg = SECONDARY
-        inactive_bg = PRIMARY
-        active_fg = PRIMARY
-        inactive_fg = SECONDARY
+        
 
         if self.order_sort_desc:
             self.order_sort_newest_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
             self.order_sort_oldest_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
-            self.order_sort_label.config(text='Sorting by received date: newest first')
+            self.order_sort_label.config(text='Sorting by received date:')
         else:
             self.order_sort_newest_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
             self.order_sort_oldest_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
-            self.order_sort_label.config(text='Sorting by received date: oldest first')
+            self.order_sort_label.config(text='Sorting by received date:')
         if refresh:
             self.refresh_all()
 
@@ -1677,7 +1674,7 @@ class ViewOrderPage(tk.Frame):
                 ]
                 if include_action:
                     child_vals.append('')
-                tree.insert(parent_iid, 'end', iid=child_iid, text="", values=tuple(child_vals), tags=('child_service',))
+                tree.insert(parent_iid, 'end', iid=child_iid, text=child_iid, values=tuple(child_vals), tags=('child_service',))
                 
     def refresh_unpaid(self):
         import db
@@ -2349,7 +2346,7 @@ class CustomersPage(tk.Frame):
 
         right_sort_frame = tk.Frame(sort_frame, bg=PRIMARY)
         right_sort_frame.grid(row=0, column=1, sticky='e')
-        self.customer_sort_label = tk.Label(right_sort_frame, text='Current: ID ascending', font=TTL_TEXT, bg=PRIMARY)
+        self.customer_sort_label = tk.Label(right_sort_frame, text='Current:', font=TTL_TEXT, bg=PRIMARY)
         self.customer_sort_label.grid(row=0, column=0, padx=(12,13), sticky='e')
         self.customer_sort_asc_btn = tk.Button(right_sort_frame, width=12, text='Ascending', font=TTL_TEXT, bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1, command=lambda: self.set_customer_sort(self.customer_sort_key, ascending=True))
         self.customer_sort_asc_btn.grid(row=0, column=1, padx=(0, 4))
@@ -2445,13 +2442,9 @@ class CustomersPage(tk.Frame):
         if self.customer_sort_desc:
             self.customer_sort_asc_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
             self.customer_sort_desc_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
-            direction = 'descending'
         else:
             self.customer_sort_asc_btn.config(bg=SECONDARY, fg='white', activebackground=SECONDARY, activeforeground='white', relief='sunken', bd=2)
             self.customer_sort_desc_btn.config(bg=ACCENT, fg=SECONDARY, activebackground=ACCENT, activeforeground=SECONDARY, relief='raised', bd=1)
-            direction = 'ascending'
-        field_name = {'id': 'ID', 'first': 'First Name', 'last': 'Last Name'}.get(self.customer_sort_key, self.customer_sort_key)
-        self.customer_sort_label.config(text=f'Current: {field_name} {direction}')
 
     def _confirm_delete(self, iid):
         import db
