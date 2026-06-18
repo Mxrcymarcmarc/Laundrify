@@ -1528,7 +1528,7 @@ class ViewOrderPage(tk.Frame):
         
         status_button_frame = tk.Frame(legend_frame, bg=PRIMARY)
         status_button_frame.grid(row=0, column=1, sticky='w', padx=(10,0))
-        for status in ["All", "Received", "In-Progress", "Ready", "Released"]:
+        for status in ["All", "Received", "In-Progress", "Ready", "Released", "Overdue"]:
             tk.Button(status_button_frame, text=status, font=TTL_TEXT, bg=PRIMARY, fg=SECONDARY, width=12, command=lambda s=status: self.sort_by_status(s)).pack(side="left", padx=3)
 
         sort_frame = tk.Frame(legend_frame, bg=PRIMARY)

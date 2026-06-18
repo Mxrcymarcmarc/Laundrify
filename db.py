@@ -990,6 +990,25 @@ def get_paid_orders():
             ORDER BY o.Order_Received_At DESC
         """)
         return cursor.fetchall()
+    
+def get_overdue_orders():
+    """Fetches all incomplete orders that have exceeded the overdue days limit threshold configuration."""
+    import sqlite3
+    from datetime import datetime, timedelta
+    
+    limit_date = (datetime.now() - timedelta(days=OrderConfig.OVERDUE_DAYS)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    with sqlite3.connect("Laundrify.db") as conn:
+        cursor = conn.cursor()
+        # Find orders that are not released, not paid, and older than the limit date threshold
+        cursor.execute("""
+            SELECT OrderID, CustomerID, Order_Status, Order_Total_Price, Order_Received_At 
+            FROM ORDERS 
+            WHERE Order_Status NOT IN ('Released', 'Cancelled') 
+              AND Order_Received_At < ?
+            ORDER BY Order_Received_At DESC
+        """, (limit_date,))
+        return cursor.fetchall()
 
 
 def get_archived_orders():
